@@ -1,0 +1,133 @@
+version: 2
+
+sources:
+  - name: solana_raw
+    schema: raw
+
+    tables:
+      - name: offerbook_transactions
+        description: >
+          Raw Solana transactions associated with the Jupiter
+          Offerbook program, ingested from Solana RPC.
+
+        config:
+          loaded_at_field: ingested_at
+
+          freshness:
+            warn_after:
+              count: 1
+              period: hour
+
+            error_after:
+              count: 6
+              period: hour
+
+        columns:
+          - name: signature
+            description: Solana transaction signature.
+            data_tests:
+              - not_null
+              - unique
+
+          - name: slot
+            description: Solana slot containing the transaction.
+            data_tests:
+              - not_null
+
+          - name: transaction_json
+            description: Full raw transaction response returned by Solana RPC.
+            data_tests:
+              - not_null
+
+          - name: ingested_at
+            description: Timestamp when our ingestion pipeline loaded the transaction.
+            data_tests:
+              - not_null
+    
+      - name: token_mints
+        description: >
+          Parsed Solana mint accounts used by Offerbook,
+          fetched from Solana RPC.
+
+        columns:
+          - name: mint_address
+            data_tests:
+              - not_null
+              - unique
+
+          - name: decimals
+            data_tests:
+              - not_null
+      
+      - name: token_metadata
+        description: >
+          Human-readable token metadata for Offerbook
+          mints retrieved from Birdeye.
+
+        columns:
+          - name: mint_address
+            data_tests:
+              - not_null
+              - unique
+      
+      - name: token_prices_hourly
+        description: >
+          Hourly historical USD token prices retrieved
+          from Birdeye for tokens used by Offerbook.
+
+        columns:
+          - name: mint_address
+            data_tests:
+              - not_null
+
+          - name: price_hour
+            data_tests:
+              - not_null
+
+          - name: price_usd
+            data_tests:
+              - not_null
+
+  - name: offerbook_decoded
+    schema: decoded
+
+    tables:
+      - name: offerbook_instructions
+
+        config:
+          loaded_at_field: decoded_at
+
+          freshness:
+            warn_after:
+              count: 1
+              period: hour
+
+            error_after:
+              count: 6
+              period: hour
+              
+      - name: offerbook_events
+        description: >
+          Offerbook Anchor CPI events decoded from inner
+          instructions using the current Offerbook IDL.
+
+        columns:
+          - name: signature
+            data_tests:
+              - not_null
+
+          - name: event_name
+            data_tests:
+              - not_null
+
+          - name: decoded_event
+            data_tests:
+              - not_null
+
+          - name: decode_status
+            data_tests:
+              - not_null
+
+          - name: idl_sha256
+            data_tests:
+              - not_null

@@ -1,0 +1,11 @@
+dbt-core==1.12.3
+dbt-duckdb==1.11.0
+
+duckdb
+requests
+aiohttp
+base58
+
+pandas
+
+streamlit

@@ -1,0 +1,113 @@
+version: 2
+
+models:
+  - name: stg_offerbook_transactions
+    description: >
+      Cleaned transaction-level representation of raw
+      Offerbook-related Solana transactions.
+
+    columns:
+      - name: signature
+        description: Solana transaction signature.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: slot
+        data_tests:
+          - not_null
+
+      - name: block_timestamp
+        data_tests:
+          - not_null
+
+      - name: is_success
+        data_tests:
+          - not_null
+
+      - name: fee_lamports
+        data_tests:
+          - not_null
+
+
+  - name: stg_offerbook_instructions
+    description: >
+      One row per top-level Solana instruction from
+      Offerbook-related transactions.
+
+    columns:
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: instruction_index
+        data_tests:
+          - not_null
+
+      - name: program_id
+        data_tests:
+          - not_null
+
+      - name: instruction_data
+        data_tests:
+          - not_null
+
+  - name: stg_offerbook_decoded_instructions
+    description: >
+      IDL-decoded Offerbook instructions produced by
+      the external Python Borsh decoder.
+
+    columns:
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: instruction_index
+        data_tests:
+          - not_null
+
+      - name: discriminator
+        data_tests:
+          - not_null
+
+      - name: instruction_name
+        data_tests:
+          - not_null
+
+      - name: decode_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - ok
+                  - ok_with_remaining_bytes
+                  - unknown_discriminator
+                  - decode_error
+
+
+  - name: stg_offerbook_events
+    description: >
+      Decoded Offerbook Anchor events staged for downstream models.
+
+    columns:
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: event_name
+        data_tests:
+          - not_null
+
+      - name: decode_status
+        data_tests:
+          - not_null
+
+      - name: decoded_event
+        data_tests:
+          - not_null
+
+      - name: idl_sha256
+        data_tests:
+          - not_null

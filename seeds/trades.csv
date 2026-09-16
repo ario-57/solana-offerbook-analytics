@@ -1,0 +1,9 @@
+trade_id,block_date,trader,token_pair,amount_usd
+1,2026-09-01,wallet_a,SOL-USDC,1000
+2,2026-09-01,wallet_b,SOL-USDC,2500
+3,2026-09-01,wallet_a,JUP-USDC,750
+4,2026-09-02,wallet_c,SOL-USDC,5000
+5,2026-09-02,wallet_b,JUP-USDC,1250
+6,2026-09-02,wallet_d,SOL-USDC,3000
+7,2026-09-03,wallet_a,SOL-USDC,4200
+8,2026-09-03,wallet_c,JUP-USDC,1600

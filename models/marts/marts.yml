@@ -1,0 +1,217 @@
+version: 2
+
+models:
+  - name: mart_offerbook_daily_activity
+    description: >
+      Daily Offerbook protocol activity aggregated by
+      decoded instruction type.
+
+    columns:
+      - name: block_date
+        description: UTC date of the Solana transaction.
+        data_tests:
+          - not_null
+
+      - name: instruction_name
+        description: >
+          Offerbook instruction name decoded from the
+          program IDL.
+        data_tests:
+          - not_null
+
+      - name: instruction_count
+        description: >
+          Number of Offerbook instructions executed
+          during the day.
+        data_tests:
+          - not_null
+
+      - name: transaction_count
+        description: >
+          Number of distinct Solana transactions containing
+          this Offerbook instruction.
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_daily_lending
+    description: >
+      Daily Offerbook lending activity derived from
+      successfully created loans.
+
+    columns:
+
+      - name: block_date
+        data_tests:
+          - not_null
+          - unique
+
+      - name: loan_count
+        data_tests:
+          - not_null
+
+      - name: unique_lenders
+        data_tests:
+          - not_null
+
+      - name: unique_borrowers
+        data_tests:
+          - not_null
+
+      - name: unique_users
+        data_tests:
+          - not_null
+
+      - name: priced_loan_count
+        data_tests:
+          - not_null
+
+      - name: unpriced_loan_count
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_lifecycle_overview
+    description: >
+      Current protocol-level Offerbook loan lifecycle snapshot.
+      Includes active, repaid, defaulted, past-due and extension
+      metrics, plus origination-value USD metrics.
+
+    columns:
+
+      - name: snapshot_at
+        data_tests:
+          - not_null
+
+      - name: total_loans
+        data_tests:
+          - not_null
+
+      - name: active_loans
+        data_tests:
+          - not_null
+
+      - name: repaid_loans
+        data_tests:
+          - not_null
+
+      - name: defaulted_loans
+        data_tests:
+          - not_null
+
+      - name: closed_loans
+        data_tests:
+          - not_null
+
+      - name: unique_users
+        data_tests:
+          - not_null
+
+      - name: priced_loan_count
+        data_tests:
+          - not_null
+
+      - name: unpriced_loan_count
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_daily_lifecycle
+    description: >
+      Daily Offerbook lifecycle activity combining loan
+      originations, repayments, defaults, point-in-time USD
+      values and unique active users.
+
+    columns:
+
+      - name: block_date
+        data_tests:
+          - not_null
+          - unique
+
+      - name: originated_loans
+        data_tests:
+          - not_null
+
+      - name: repaid_loans
+        data_tests:
+          - not_null
+
+      - name: defaulted_loans
+        data_tests:
+          - not_null
+
+      - name: unique_active_users
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_daily_markets
+    description: >
+      Daily Offerbook market-level lending activity.
+      One row represents one date and one
+      principal/collateral mint pair.
+
+    columns:
+
+      - name: block_date
+        data_tests:
+          - not_null
+
+      - name: principal_asset_key
+        data_tests:
+          - not_null
+
+      - name: collateral_asset_key
+        data_tests:
+          - not_null
+
+      - name: market_name
+        data_tests:
+          - not_null
+
+      - name: originated_loans
+        data_tests:
+          - not_null
+
+      - name: repaid_loans
+        data_tests:
+          - not_null
+
+      - name: defaulted_loans
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_loan_cohorts
+    description: >
+      Offerbook loan performance cohorts grouped by
+      origination date and principal/collateral market.
+
+    columns:
+
+      - name: cohort_date
+        data_tests:
+          - not_null
+
+      - name: market_name
+        data_tests:
+          - not_null
+
+      - name: originated_loans
+        data_tests:
+          - not_null
+
+      - name: active_loans
+        data_tests:
+          - not_null
+
+      - name: repaid_loans
+        data_tests:
+          - not_null
+
+      - name: defaulted_loans
+        data_tests:
+          - not_null
+      - name: principal_asset_key
+        data_tests:
+          - not_null
+
+      - name: collateral_asset_key
+        data_tests:
+          - not_null

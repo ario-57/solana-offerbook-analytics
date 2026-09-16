@@ -1,0 +1,35 @@
+version: 2
+
+models:
+
+  - name: daily_dex_volume
+    description: >
+      Daily DEX trading metrics grouped by date
+      and token pair.
+
+    columns:
+
+      - name: block_date
+        description: Date on which the trades occurred.
+        data_tests:
+          - not_null
+
+      - name: token_pair
+        description: Trading pair, such as SOL-USDC or JUP-USDC.
+        data_tests:
+          - not_null
+
+      - name: trade_count
+        description: Total number of trades for the date and pair.
+        data_tests:
+          - not_null
+
+      - name: unique_traders
+        description: Number of distinct wallets that traded.
+        data_tests:
+          - not_null
+
+      - name: volume_usd
+        description: Total USD trading volume.
+        data_tests:
+          - not_null

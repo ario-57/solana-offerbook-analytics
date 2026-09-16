@@ -1,0 +1,535 @@
+version: 2
+
+models:
+  - name: int_offerbook_instructions
+    description: >
+      Top-level instructions executed specifically by the
+      Jupiter Offerbook program.
+
+    columns:
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: instruction_index
+        data_tests:
+          - not_null
+
+      - name: program_id
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - offerbkFMvVfpQhL8ZQ5iromnjct5rz3r52B9ewu3ie
+
+      - name: instruction_data
+        data_tests:
+          - not_null
+  
+  - name: int_offerbook_offer_creations
+    description: >
+      Decoded token offer creation instructions from
+      the Offerbook protocol.
+
+    columns:
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: instruction_index
+        data_tests:
+          - not_null
+
+      - name: block_timestamp
+        data_tests:
+          - not_null
+
+      - name: instruction_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - create_token_principal_offer
+                  - create_token_collateral_offer
+
+      - name: offer_side
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - principal
+                  - collateral
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: collateral_amount_raw
+        data_tests:
+          - not_null
+
+      - name: apy_raw
+        data_tests:
+          - not_null
+
+      - name: duration_raw
+        data_tests:
+          - not_null
+      
+      - name: signer_address
+        data_tests:
+          - not_null
+
+      - name: offer_address
+        data_tests:
+          - not_null
+
+      - name: principal_mint
+        data_tests:
+          - not_null
+
+      - name: collateral_mint
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_offer_creations_enriched
+    description: >
+      Offerbook token offer creations enriched with
+      Solana mint decimals and normalized token amounts.
+
+    columns:
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: offer_address
+        data_tests:
+          - not_null
+
+      - name: principal_mint
+        data_tests:
+          - not_null
+
+      - name: collateral_mint
+        data_tests:
+          - not_null
+
+      - name: principal_decimals
+        data_tests:
+          - not_null
+
+      - name: collateral_decimals
+        data_tests:
+          - not_null
+
+      - name: principal_amount
+        data_tests:
+          - not_null
+
+      - name: collateral_amount
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_fills
+    description: >
+      Token offer fill instructions that initiate
+      Offerbook loan creation.
+
+    columns:
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: instruction_index
+        data_tests:
+          - not_null
+
+      - name: instruction_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - fill_token_principal_offer
+                  - fill_token_collateral_offer
+
+      - name: offer_address
+        data_tests:
+          - not_null
+
+      - name: loan_address
+        data_tests:
+          - not_null
+
+      - name: principal_mint
+        data_tests:
+          - not_null
+
+      - name: collateral_mint
+        data_tests:
+          - not_null
+  
+  - name: int_offerbook_loans
+    description: >
+      Canonical Offerbook loan origination model.
+      One row represents one successfully created loan.
+      Normalizes LoanEventV0 and LoanEventV1.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: offer_address
+        data_tests:
+          - not_null
+
+      - name: lender_address
+        data_tests:
+          - not_null
+
+      - name: borrower_address
+        data_tests:
+          - not_null
+
+      - name: event_version
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - v0
+                  - v1
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: collateral_amount_raw
+        data_tests:
+          - not_null
+
+      - name: loan_status
+        data_tests:
+          - not_null
+
+      - name: loan_created_at
+        data_tests:
+          - not_null
+
+      - name: idl_sha256
+        data_tests:
+          - not_null
+        
+  - name: int_offerbook_loans_enriched
+    description: >
+      Offerbook loan originations enriched with token
+      metadata, normalized token amounts and hourly
+      historical USD prices.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: principal_asset_type
+        data_tests:
+          - not_null
+
+      - name: loan_created_at
+        data_tests:
+          - not_null
+
+      - name: price_hour
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_repayments
+    description: >
+      Successfully repaid Offerbook loans derived from
+      LoanRepaid and LoanRepaidV1 events.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: event_version
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - v0
+                  - v1
+
+      - name: lender_address
+        data_tests:
+          - not_null
+
+      - name: borrower_address
+        data_tests:
+          - not_null
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: interest_raw
+        data_tests:
+          - not_null
+
+      - name: repaid_at
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_defaults
+    description: >
+      Defaulted Offerbook loans derived from
+      LoanDefaulted and LoanDefaultedV1 events.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: event_version
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - v0
+                  - v1
+
+      - name: lender_address
+        data_tests:
+          - not_null
+
+      - name: borrower_address
+        data_tests:
+          - not_null
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: collateral_amount_raw
+        data_tests:
+          - not_null
+
+      - name: defaulted_at
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_extensions
+    description: >
+      Offerbook loan extension events derived from
+      LoanExtended events. One row represents one
+      extension event, so a loan may appear multiple times.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: parent_instruction_index
+        data_tests:
+          - not_null
+
+      - name: inner_instruction_index
+        data_tests:
+          - not_null
+
+      - name: lender_address
+        data_tests:
+          - not_null
+
+      - name: borrower_address
+        data_tests:
+          - not_null
+
+      - name: extension_count
+        data_tests:
+          - not_null
+
+      - name: extended_at
+        data_tests:
+          - not_null
+
+      - name: loan_expired_at
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_extendability_updates
+    description: >
+      Loan-level extendability state changes derived from
+      LoanExtendabilityUpdated events.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+
+      - name: signature
+        data_tests:
+          - not_null
+
+      - name: is_extendable
+        data_tests:
+          - not_null
+
+      - name: extendability_updated_at
+        data_tests:
+          - not_null
+
+      - name: idl_sha256
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_lifecycle
+    description: >
+      Canonical one-row-per-loan Offerbook lifecycle model.
+      Combines origination, extensions, extendability updates,
+      repayments, and defaults.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: creation_signature
+        data_tests:
+          - not_null
+
+      - name: loan_created_at
+        data_tests:
+          - not_null
+
+      - name: lender_address
+        data_tests:
+          - not_null
+
+      - name: borrower_address
+        data_tests:
+          - not_null
+
+      - name: lifecycle_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Active
+                  - Repaid
+                  - Defaulted
+
+      - name: is_open
+        data_tests:
+          - not_null
+
+      - name: is_closed
+        data_tests:
+          - not_null
+
+      - name: effective_expired_at
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_repayments_enriched
+    description: >
+      Offerbook repayment events enriched with token metadata,
+      normalized amounts and point-in-time token prices at the
+      repayment timestamp.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: repaid_at
+        data_tests:
+          - not_null
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: interest_raw
+        data_tests:
+          - not_null
+
+      - name: principal_asset_type
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_loan_defaults_enriched
+    description: >
+      Offerbook default events enriched with token metadata,
+      normalized amounts and point-in-time USD prices at the
+      default timestamp.
+
+    columns:
+
+      - name: loan_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: defaulted_at
+        data_tests:
+          - not_null
+
+      - name: principal_amount_raw
+        data_tests:
+          - not_null
+
+      - name: collateral_amount_raw
+        data_tests:
+          - not_null
+
+      - name: principal_asset_type
+        data_tests:
+          - not_null
+
+      - name: collateral_asset_type
+        data_tests:
+          - not_null
