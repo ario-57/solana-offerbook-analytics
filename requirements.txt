@@ -1,7 +1,7 @@
 dbt-core==1.12.3
 dbt-duckdb==1.11.0
 
-duckdb
+duckdb==1.5.5
 requests
 aiohttp
 base58

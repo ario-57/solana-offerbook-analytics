@@ -63,6 +63,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+          python -c "import duckdb; print('DuckDB version:', duckdb.__version__); assert duckdb.__version__ == '1.5.5'"
+
       # ==============================================
       # Verify production connection
       # ==============================================
