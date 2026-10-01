@@ -1,0 +1,9 @@
+solana_analytics:
+  target: prod
+
+  outputs:
+    prod:
+      type: duckdb
+      path: "md:solana_offerbook?motherduck_token={{ env_var('MOTHERDUCK_TOKEN') }}"
+      schema: main
+      threads: 4

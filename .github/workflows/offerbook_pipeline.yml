@@ -1,0 +1,189 @@
+name: Offerbook Data Pipeline
+
+# Initially allow manual execution only.
+# We'll enable the schedule after testing successfully.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Avoid running two production pipelines simultaneously.
+concurrency:
+  group: offerbook-production
+  cancel-in-progress: false
+
+
+jobs:
+
+  offerbook-etl:
+
+    name: Ingest, Decode and Transform
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 120
+
+    env:
+      DB_TARGET: prod
+
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+
+      DBT_PROFILES_DIR: .github/dbt
+
+      INCREMENTAL_MAX_TRANSACTIONS: "20000"
+
+      DECODE_FULL_REFRESH: "0"
+      DECODE_RETRY_ERRORS: "0"
+      DECODE_BATCH_SIZE: "500"
+      DECODE_MAX_ROWS_PER_RUN: "20000"
+
+      EVENT_DECODE_MAX_SIGNATURES_PER_RUN: "1000"
+      EVENT_DECODE_BATCH_SIZE: "500"
+
+    steps:
+
+      # ==============================================
+      # Job setup
+      # ==============================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      # ==============================================
+      # Verify production connection
+      # ==============================================
+
+      - name: Validate configuration
+        run: |
+          test -n "$MOTHERDUCK_TOKEN"
+          test -n "$SOLANA_RPC_URL"
+
+          python -m ingestion.check_db_connection
+          dbt debug --target prod
+
+      # ==============================================
+      # Job 1: Incremental ingestion
+      # ==============================================
+
+      - name: Ingest latest Offerbook transactions
+        run: |
+          set -euo pipefail
+
+          python -u -m ingestion.incremental_offerbook \
+            | tee incremental.log
+
+          if grep -q "Still missing approximately" incremental.log; then
+            echo "Raw ingestion has not completed its catch-up."
+            exit 1
+          fi
+
+      # ==============================================
+      # Job 2: Upstream dbt models
+      # ==============================================
+
+      - name: Refresh instruction extraction
+        run: |
+          dbt run --target prod --select \
+            "+int_offerbook_instructions" \
+            "+int_offerbook_inner_instructions"
+
+      # ==============================================
+      # Job 3: Decode instructions
+      # ==============================================
+
+      - name: Decode new instructions
+        run: |
+          python -u -m ingestion.decode_offerbook_instructions
+
+      # ==============================================
+      # Job 4: Decode events
+      # ==============================================
+
+      - name: Decode new events
+        run: |
+          python -u -m ingestion.decode_offerbook_events
+
+      # ==============================================
+      # Job 5: Verify decoding completeness
+      # ==============================================
+
+      - name: Check processing backlog
+        run: |
+          python - <<'PY'
+          from ingestion.db import get_connection
+          from ingestion.decode_offerbook_events import (
+              IDL_PATH,
+              SOURCE_MODEL,
+              SCAN_STATE_TABLE,
+              get_idl_sha256,
+          )
+
+          con = get_connection()
+
+          try:
+              missing_instructions = con.execute("""
+                  select count(*)
+                  from main.int_offerbook_instructions s
+                  left join decoded.offerbook_instructions d
+                      on s.signature = d.signature
+                      and s.instruction_index = d.instruction_index
+                  where s.instruction_data is not null
+                    and d.signature is null
+              """).fetchone()[0]
+
+              pending_events = con.execute(f"""
+                  select count(*)
+                  from (
+                      select distinct i.signature
+                      from {SOURCE_MODEL} i
+                      left join {SCAN_STATE_TABLE} s
+                          on i.signature = s.signature
+                      where i.instruction_data is not null
+                        and (
+                            s.signature is null
+                            or s.idl_sha256 is distinct from ?
+                        )
+                  ) pending
+              """, [get_idl_sha256(IDL_PATH)]).fetchone()[0]
+
+              print(f"Missing instructions: {missing_instructions:,}")
+              print(f"Pending event signatures: {pending_events:,}")
+
+              if missing_instructions or pending_events:
+                  raise SystemExit(
+                      "Decoding backlog remains. "
+                      "Stopping before downstream mart refresh."
+                  )
+          finally:
+              con.close()
+          PY
+
+      # ==============================================
+      # Job 6: Downstream dbt transformations
+      # ==============================================
+
+      - name: Build analytics models
+        run: |
+          dbt run --target prod
+
+      # ==============================================
+      # Job 7: Data quality
+      # ==============================================
+
+      - name: Run dbt tests
+        run: |
+          dbt test --target prod
