@@ -2,9 +2,8 @@ import json
 import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from ingestion.db import get_connection, get_target
 
-import duckdb
 import requests
 
 
@@ -20,10 +19,6 @@ RPC_URL = os.getenv(
     "SOLANA_RPC_URL",
     "https://api.mainnet-beta.solana.com",
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-DB_PATH = PROJECT_ROOT / "solana.duckdb"
 
 
 # Maximum number of signatures returned by
@@ -471,9 +466,14 @@ def main():
     # Connect to DuckDB
     # --------------------------------------------------------
 
-    con = duckdb.connect(
-        str(DB_PATH)
-    )
+    con = get_connection()
+
+    current_database = con.execute(
+        "select current_database()"
+    ).fetchone()[0]
+
+    print(f"Database target: {get_target()}")
+    print(f"Database: {current_database}")
 
     ensure_table(
         con

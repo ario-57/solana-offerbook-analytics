@@ -71,3 +71,4 @@ Thumbs.db
 
 *.tmp
 *.temp
+dbt_internal_packages/
