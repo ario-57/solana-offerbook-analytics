@@ -1,0 +1,108 @@
+name: Offerbook Event Catch-up
+
+on:
+  workflow_dispatch:
+    inputs:
+      signature_batch:
+        description: "Transaction signatures per decoding batch"
+        required: true
+        default: "3000"
+        type: choice
+        options:
+          - "1000"
+          - "3000"
+          - "5000"
+
+permissions:
+  contents: read
+
+# Prevent simultaneous writes from the main pipeline
+# and the historical catch-up workflow.
+concurrency:
+  group: offerbook-production
+  cancel-in-progress: false
+
+jobs:
+  event-backfill:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 300
+
+    env:
+      DB_TARGET: prod
+
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      EVENT_DECODE_MAX_SIGNATURES_PER_RUN: ${{ inputs.signature_batch }}
+
+      EVENT_DECODE_BATCH_SIZE: "500"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+          python -c "import duckdb; print('DuckDB:', duckdb.__version__)"
+
+      - name: Decode historical events automatically
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          max_runs=60
+
+          for run in $(seq 1 "$max_runs"); do
+
+            echo ""
+            echo "==================================="
+            echo "Event decoding batch $run / $max_runs"
+            echo "==================================="
+
+            python -u -m ingestion.decode_offerbook_events \
+              2>&1 | tee event_decode.log
+
+            # The decoder may immediately report that
+            # there is no remaining work.
+            if grep -q "Event decoder is already up to date" event_decode.log; then
+              echo "Historical catch-up completed."
+              exit 0
+            fi
+
+            # Extract the number printed by the decoder.
+            remaining=$(
+              sed -n \
+                's/^Pending signatures remaining:[[:space:]]*//p' \
+                event_decode.log \
+                | tail -n 1 \
+                | tr -d ',[:space:]'
+            )
+
+            # Never silently continue if we cannot read progress.
+            if [[ ! "$remaining" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: Could not determine remaining backlog."
+              exit 1
+            fi
+
+            echo "Remaining signatures: $remaining"
+
+            # Exit automatically when fully caught up.
+            if (( remaining == 0 )); then
+              echo "Historical catch-up completed!"
+              exit 0
+            fi
+
+          done
+
+          echo "Maximum batch count reached."
+          echo "Progress is saved in MotherDuck."
+          echo "Run this workflow again to continue."
