@@ -40,7 +40,7 @@ jobs:
       DECODE_BATCH_SIZE: "500"
       DECODE_MAX_ROWS_PER_RUN: "20000"
 
-      EVENT_DECODE_MAX_SIGNATURES_PER_RUN: "1000"
+      EVENT_DECODE_MAX_SIGNATURES_PER_RUN: "3000"
       EVENT_DECODE_BATCH_SIZE: "500"
 
     steps:
@@ -116,9 +116,50 @@ jobs:
       # ==============================================
 
       - name: Decode new events
+        shell: bash
         run: |
-          python -u -m ingestion.decode_offerbook_events
+          set -euo pipefail
 
+          max_runs=20
+
+          for run in $(seq 1 "$max_runs"); do
+
+            echo "================================="
+            echo "Event decoding batch: $run"
+            echo "================================="
+
+            python -u -m ingestion.decode_offerbook_events \
+              2>&1 | tee event_decode.log
+
+            if grep -q "Event decoder is already up to date" event_decode.log; then
+              echo "Event decoding completed successfully."
+              exit 0
+            fi
+
+            remaining=$(
+              sed -n \
+                's/^Pending signatures remaining:[[:space:]]*//p' \
+                event_decode.log \
+                | tail -n 1 \
+                | tr -d ',[:space:]'
+            )
+
+            if [[ ! "$remaining" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: Could not read the remaining backlog."
+              exit 1
+            fi
+
+            echo "Pending signatures: $remaining"
+
+            if (( remaining == 0 )); then
+              echo "All event signatures processed successfully."
+              exit 0
+            fi
+
+          done
+
+          echo "ERROR: Event backlog remains after $max_runs batches."
+          exit 1
       # ==============================================
       # Job 5: Verify decoding completeness
       # ==============================================
