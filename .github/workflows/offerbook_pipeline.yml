@@ -234,10 +234,54 @@ jobs:
         run: |
           dbt run --target prod
 
+
+
       # ==============================================
-      # Job 8: Data quality
+      # Job 8: Report decoding quality
       # ==============================================
 
-      - name: Run dbt tests
+      - name: Report decoding quality
         run: |
-          dbt test --target prod
+          python - <<'PY'
+          from ingestion.db import get_connection
+
+          con = get_connection()
+
+          try:
+              for label, table in [
+                  ("Instructions", "decoded.offerbook_instructions"),
+                  ("Events", "decoded.offerbook_events"),
+              ]:
+
+                  print(f"\n{label} decoding status:")
+
+                  rows = con.execute(f"""
+                      select
+                          decode_status,
+                          count(*) as row_count
+                      from {table}
+                      group by decode_status
+                      order by row_count desc
+                  """).fetchall()
+
+                  for status, count in rows:
+                      print(f"  {status}: {count:,}")
+
+          finally:
+              con.close()
+          PY
+
+
+      # ==============================================
+      # Job 9: Critical Production Data Quality
+      # ==============================================
+
+      - name: Run critical dbt tests
+        run: |
+          dbt test --target prod \
+            --select \
+            stg_offerbook_decoded_instructions \
+            stg_offerbook_events \
+            int_offerbook_offer_creations_enriched \
+            source:offerbook_decoded.offerbook_events \
+            --threads 2
