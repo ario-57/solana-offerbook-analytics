@@ -1,0 +1,78 @@
+name: Offerbook Full Data Audit
+
+# Manual execution only
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Avoid running during the production ETL.
+concurrency:
+  group: offerbook-production
+  cancel-in-progress: false
+
+jobs:
+
+  full-audit:
+
+    name: Run Complete Data Quality Audit
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 240
+
+    env:
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      DBT_PROFILES_DIR: .github/dbt
+
+    steps:
+
+      # ----------------------------------------
+      # Prepare execution environment
+      # ----------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      # ----------------------------------------
+      # Verify MotherDuck connection
+      # ----------------------------------------
+
+      - name: Validate dbt connection
+        run: |
+          dbt debug --target prod
+
+      # ----------------------------------------
+      # Run complete test suite
+      # ----------------------------------------
+
+      - name: Run all dbt tests
+        run: |
+          dbt test --target prod --threads 2
+
+      # ----------------------------------------
+      # Preserve dbt execution results
+      # ----------------------------------------
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offerbook-full-audit-results
+          path: |
+            target/run_results.json
+            target/manifest.json
+          if-no-files-found: ignore
+          retention-days: 7
