@@ -80,6 +80,11 @@ jobs:
           python -m ingestion.check_db_connection
           dbt debug --target prod
 
+
+      - name: Capture pipeline start time
+        run: |
+          echo "PIPELINE_STARTED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
       # ==============================================
       # Job 1: Incremental ingestion
       # ==============================================
@@ -239,39 +244,115 @@ jobs:
 
 
 
-      # ==============================================
-      # Job 8: Report decoding quality
+            # ==============================================
+      # Job 8: Production Observability
       # ==============================================
 
       - name: Report decoding quality
         run: |
           python - <<'PY'
+
+          import os
+
           from ingestion.db import get_connection
+
+          started_at = os.environ["PIPELINE_STARTED_AT"]
 
           con = get_connection()
 
+          summary = [
+              "## Offerbook ETL Quality Report",
+              "",
+              f"Pipeline started (UTC): `{started_at}`",
+              "",
+              "| Dataset | Status | Total records | Processed this run |",
+              "|---|---|---:|---:|",
+          ]
+
           try:
+
               for label, table in [
                   ("Instructions", "decoded.offerbook_instructions"),
                   ("Events", "decoded.offerbook_events"),
               ]:
 
-                  print(f"\n{label} decoding status:")
-
                   rows = con.execute(f"""
                       select
                           decode_status,
-                          count(*) as row_count
-                      from {table}
-                      group by decode_status
-                      order by row_count desc
-                  """).fetchall()
 
-                  for status, count in rows:
-                      print(f"  {status}: {count:,}")
+                          count(*) as total_records,
+
+                          count(*) filter (
+                              where decoded_at >= cast(? as timestamptz)
+                          ) as processed_this_run
+
+                      from {table}
+
+                      group by decode_status
+
+                      order by total_records desc
+
+                  """, [started_at]).fetchall()
+
+                  print(f"\n{label} decoding quality:")
+
+                  for status, total, current in rows:
+
+                      print(
+                          f"{status}: "
+                          f"{total:,} total, "
+                          f"{current:,} processed this run"
+                      )
+
+                      summary.append(
+                          f"| {label} | {status} | "
+                          f"{total:,} | {current:,} |"
+                      )
+
+              # Validate the enriched Offerbook dataset.
+
+              total, missing = con.execute("""
+                  select
+                      count(*),
+
+                      count(*) filter (
+                          where collateral_decimals is null
+                      )
+
+                  from main.int_offerbook_offer_creations_enriched
+
+              """).fetchone()
+
+              print("\nOfferbook enrichment:")
+              print(f"Total offers: {total:,}")
+              print(f"Missing collateral decimals: {missing:,}")
+
+              summary.extend([
+                  "",
+                  "### Enrichment quality",
+                  "",
+                  f"- Total offers: **{total:,}**",
+                  f"- Missing collateral decimals: **{missing:,}**",
+              ])
+
+              summary_path = os.getenv("GITHUB_STEP_SUMMARY")
+
+              if summary_path:
+
+                  with open(
+                      summary_path,
+                      "a",
+                      encoding="utf-8",
+                  ) as file:
+
+                      file.write(
+                          "\n".join(summary) + "\n"
+                      )
 
           finally:
+
               con.close()
+
           PY
 
 
