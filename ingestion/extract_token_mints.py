@@ -2,14 +2,13 @@ import json
 import os
 import time
 from pathlib import Path
-
-import duckdb
 import requests
 
+from ingestion.db import (
+    get_connection,
+    get_target,
+)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-DB_PATH = PROJECT_ROOT / "solana.duckdb"
 
 RPC_URL = os.getenv(
     "SOLANA_RPC_URL",
@@ -77,22 +76,34 @@ def rpc_request(method, params):
 def get_offerbook_mints(con):
 
     rows = con.execute("""
-        select distinct mint_address
-        from (
+        with offerbook_mints as (
 
-            select
-                principal_mint as mint_address
+            select principal_mint as mint_address
             from main.int_offerbook_offer_accounts
 
             union
 
-            select
-                collateral_mint as mint_address
+            select collateral_mint as mint_address
             from main.int_offerbook_offer_accounts
 
         )
-        where mint_address is not null
-        order by mint_address
+
+        select
+            o.mint_address
+
+        from offerbook_mints o
+
+        left join raw.token_mints m
+            on o.mint_address = m.mint_address
+
+        where o.mint_address is not null
+
+          and (
+              m.mint_address is null
+              or m.decimals is null
+          )
+
+        order by o.mint_address
     """).fetchall()
 
     return [
@@ -123,7 +134,11 @@ def fetch_mint_accounts(mints):
 
 def main():
 
-    con = duckdb.connect(str(DB_PATH))
+    con = get_connection()
+
+    print(
+    f"Database target: {get_target()}"
+    )   
 
     con.execute("""
         create schema if not exists raw
@@ -194,6 +209,14 @@ def main():
             info = parsed.get("info", {})
 
             decimals = info.get("decimals")
+            if decimals is None:
+
+                print(
+                    f"No decimals returned for {mint}. "
+                    "Skipping this mint."
+                )
+
+                continue
             supply = info.get("supply")
             is_initialized = info.get(
                 "isInitialized"

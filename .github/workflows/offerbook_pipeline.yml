@@ -215,8 +215,19 @@ jobs:
               con.close()
           PY
 
+
       # ==============================================
-      # Job 6: Downstream dbt transformations
+      # Job 6: Refresh Offerbook Token Mints
+      # ==============================================
+
+      - name: Refresh Offerbook token mints
+        run: |
+          dbt run --target prod --select int_offerbook_offer_accounts
+
+          python -u -m ingestion.extract_token_mints
+
+      # ==============================================
+      # Job 7: Downstream dbt transformations
       # ==============================================
 
       - name: Build analytics models
@@ -224,7 +235,7 @@ jobs:
           dbt run --target prod
 
       # ==============================================
-      # Job 7: Data quality
+      # Job 8: Data quality
       # ==============================================
 
       - name: Run dbt tests
