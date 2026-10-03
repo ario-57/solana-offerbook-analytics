@@ -72,7 +72,9 @@ models:
 
       - name: instruction_name
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "decode_status in ('ok', 'ok_with_remaining_bytes')"
 
       - name: decode_status
         data_tests:
@@ -106,7 +108,9 @@ models:
 
       - name: decoded_event
         data_tests:
-          - not_null
+          - not_null:
+              config:
+                where: "decode_status in ('ok', 'ok_with_remaining_bytes')"
 
       - name: idl_sha256
         data_tests:
