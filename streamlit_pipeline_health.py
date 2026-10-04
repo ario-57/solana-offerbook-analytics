@@ -100,6 +100,303 @@ def load_run_history(days: int | None) -> pd.DataFrame:
 
 
 # ======================================================
+# Operational health: latest execution and last success
+# ======================================================
+
+@st.cache_data(
+    ttl=300,
+    show_spinner=False,
+)
+def load_health_snapshot() -> pd.DataFrame:
+
+    query = """
+        with latest_attempt as (
+
+            select
+                github_run_id,
+                run_attempt,
+                started_at,
+
+                effective_status,
+                github_run_url,
+
+                instruction_issues,
+                event_issues
+
+            from main.mart_pipeline_run_health
+
+            order by
+                started_at desc,
+                github_run_id desc,
+                run_attempt desc
+
+            limit 1
+
+        ),
+
+        latest_success as (
+
+            select
+                finished_at as last_success_at,
+
+                missing_collateral_decimals
+                    as latest_missing_decimals
+
+            from main.mart_pipeline_run_health
+
+            where status = 'success'
+              and finished_at is not null
+
+            order by
+                finished_at desc,
+                github_run_id desc,
+                run_attempt desc
+
+            limit 1
+
+        )
+
+        select
+            a.*,
+
+            s.last_success_at,
+            s.latest_missing_decimals,
+
+            date_diff(
+                'minute',
+                s.last_success_at,
+                current_timestamp
+            ) as minutes_since_success
+
+        from latest_attempt a
+
+        left join latest_success s
+            on true
+    """
+
+    con = get_connection()
+
+    try:
+
+        return con.execute(query).fetchdf()
+
+    finally:
+
+        con.close()
+
+
+
+# ======================================================
+# Evaluate operational health rules
+# ======================================================
+
+def evaluate_pipeline_health(
+    snapshot: pd.DataFrame,
+) -> list[tuple[str, str]]:
+
+    alerts = []
+
+    if snapshot.empty:
+
+        return [
+            (
+                "warning",
+                "No pipeline executions have been recorded yet."
+            )
+        ]
+
+    latest = snapshot.iloc[0]
+
+    status = latest["effective_status"]
+
+    # Rule 1: Execution status
+
+    if status in ["failure", "cancelled", "stale"]:
+
+        alerts.append((
+            "error",
+            f"Latest pipeline attempt has status: {status}."
+        ))
+
+    elif status == "running":
+
+        alerts.append((
+            "info",
+            "The latest pipeline execution is still running."
+        ))
+
+    # Rule 2: Time since last successful execution
+
+    minutes = latest["minutes_since_success"]
+
+    if pd.isna(minutes):
+
+        alerts.append((
+            "error",
+            "No completed successful pipeline run was found."
+        ))
+
+    elif minutes >= 48 * 60:
+
+        alerts.append((
+            "error",
+            "The last successful pipeline execution "
+            "was more than 48 hours ago."
+        ))
+
+    elif minutes >= 28 * 60:
+
+        alerts.append((
+            "warning",
+            "The last successful pipeline execution "
+            "was more than 28 hours ago."
+        ))
+
+    # Rule 3: Enrichment quality
+
+    missing = latest["latest_missing_decimals"]
+
+    if pd.notna(missing) and missing > 0:
+
+        alerts.append((
+            "error",
+            f"{int(missing):,} offers had missing collateral "
+            "decimals in the latest successful run."
+        ))
+
+    # Rule 4: Decoder quality in the latest attempt
+
+    if status == "success":
+
+        for column, label in [
+            ("instruction_issues", "instruction"),
+            ("event_issues", "event"),
+        ]:
+
+            value = latest[column]
+
+            if pd.notna(value) and value > 0:
+
+                alerts.append((
+                    "warning",
+                    f"{int(value):,} {label} decoding issues "
+                    "were written or reprocessed "
+                    "during the latest run."
+                ))
+
+    # No detected operational problems
+
+    if not alerts:
+
+        alerts.append((
+            "success",
+            "No operational health issues detected."
+        ))
+
+    return alerts
+
+
+
+# ======================================================
+# Render operational health in Streamlit
+# ======================================================
+
+def render_health_panel(
+    snapshot: pd.DataFrame,
+):
+
+    st.subheader("Operational health")
+
+    if snapshot.empty:
+
+        st.warning(
+            "No pipeline execution history is available."
+        )
+
+        return
+
+    latest = snapshot.iloc[0]
+
+    # --------------------------------------
+    # Main operational indicators
+    # --------------------------------------
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "Latest attempt",
+        str(latest["effective_status"]).upper(),
+    )
+
+    minutes = latest["minutes_since_success"]
+
+    if pd.notna(minutes):
+
+        freshness_text = (
+            f"{max(0, minutes) / 60:.1f} hours ago"
+        )
+
+    else:
+
+        freshness_text = "N/A"
+
+    col2.metric(
+        "Last successful execution",
+        freshness_text,
+    )
+
+    missing = latest["latest_missing_decimals"]
+
+    missing_text = (
+        f"{int(missing):,}"
+        if pd.notna(missing)
+        else "N/A"
+    )
+
+    col3.metric(
+        "Missing collateral decimals",
+        missing_text,
+    )
+
+    # --------------------------------------
+    # Evaluate and display health alerts
+    # --------------------------------------
+
+    alerts = evaluate_pipeline_health(
+        snapshot
+    )
+
+    for level, message in alerts:
+
+        if level == "error":
+
+            st.error(message)
+
+        elif level == "warning":
+
+            st.warning(message)
+
+        elif level == "info":
+
+            st.info(message)
+
+        elif level == "success":
+
+            st.success(message)
+
+    # --------------------------------------
+    # GitHub Actions navigation
+    # --------------------------------------
+
+    run_url = latest["github_run_url"]
+
+    if pd.notna(run_url):
+
+        st.markdown(
+            f"[Open latest GitHub Actions run]({run_url})"
+        )
+
+# ======================================================
 # 4. Calculate and display KPI metrics
 # ======================================================
 
@@ -336,8 +633,9 @@ def render_run_history(df: pd.DataFrame):
     )
 
 
+
 # ======================================================
-# 8. Main application
+# Main application
 # ======================================================
 
 def main():
@@ -349,7 +647,10 @@ def main():
         "MotherDuck, dbt and GitHub Actions."
     )
 
-    # Sidebar filters.
+    # --------------------------------------
+    # Sidebar filters
+    # --------------------------------------
+
     st.sidebar.header("Dashboard controls")
 
     selected_window = st.sidebar.selectbox(
@@ -360,31 +661,41 @@ def main():
 
     days = TIME_WINDOWS[selected_window]
 
-    # Manual cache refresh.
+    # --------------------------------------
+    # Refresh cached database results
+    # --------------------------------------
+
     if st.sidebar.button("Refresh MotherDuck data"):
 
         load_run_history.clear()
 
+        load_health_snapshot.clear()
+
     st.sidebar.caption(
-        "Data is automatically refreshed after "
-        "five minutes or when Refresh is clicked."
+        "Results are cached for up to five minutes. "
+        "Click Refresh to request current data."
     )
 
-    # Fetch data.
+    # --------------------------------------
+    # Fetch monitoring data
+    # --------------------------------------
+
     try:
 
         with st.spinner(
-            "Loading pipeline history..."
+            "Loading monitoring data..."
         ):
+
+            health_df = load_health_snapshot()
 
             df = load_run_history(days)
 
     except Exception as exc:
 
         st.error(
-            "Unable to load MotherDuck data. "
+            "Unable to load MotherDuck monitoring data. "
             "Check DB_TARGET, MOTHERDUCK_TOKEN "
-            "and the database connection."
+            "and your database connection."
         )
 
         st.caption(
@@ -393,32 +704,27 @@ def main():
 
         st.stop()
 
-    # Handle an empty result.
+    # --------------------------------------
+    # Operational health (all history)
+    # --------------------------------------
+
+    render_health_panel(health_df)
+
+    st.divider()
+
+    # --------------------------------------
+    # Historical analytics (filtered)
+    # --------------------------------------
+
     if df.empty:
 
         st.info(
             "No pipeline executions were found "
-            "for the selected period."
+            "for the selected time window."
         )
 
         st.stop()
 
-    # Display the latest operational state.
-    latest = df.iloc[0]
-
-    st.write(
-        "Latest attempt status:",
-        f"**{latest['effective_status']}**",
-    )
-
-    if latest["effective_status"] == "stale":
-
-        st.warning(
-            "The latest pipeline attempt appears stale. "
-            "Check its GitHub Actions execution."
-        )
-
-    # Render the dashboard sections.
     render_metrics(df)
 
     st.divider()
