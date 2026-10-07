@@ -578,19 +578,6 @@ models:
         data_tests:
           - not_null
 
-  - name: int_offerbook_offer_creations_priced
-    description: >
-      Token offer creations enriched with daily historical
-      principal and collateral USD reference prices.
-    columns:
-      - name: offer_address
-        data_tests:
-          - not_null
-
-      - name: price_date
-        data_tests:
-          - not_null
-
   - name: int_offerbook_offer_lifecycle
     description: >
       One row per Offerbook offer combining creation, fill,
