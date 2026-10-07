@@ -33,6 +33,7 @@ jobs:
 
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+      BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
 
       DBT_PROFILES_DIR: .github/dbt
 
@@ -76,6 +77,7 @@ jobs:
         run: |
           test -n "$MOTHERDUCK_TOKEN"
           test -n "$SOLANA_RPC_URL"
+          test -n "$BIRDEYE_API_KEY"
 
           python -m ingestion.check_db_connection
           dbt debug --target prod

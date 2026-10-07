@@ -115,3 +115,26 @@ models:
       - name: idl_sha256
         data_tests:
           - not_null
+
+  - name: stg_token_prices_daily
+    description: >
+      Daily historical USD reference prices for
+      Offerbook token assets.
+
+    columns:
+
+      - name: mint_address
+        data_tests:
+          - not_null
+
+      - name: price_date
+        data_tests:
+          - not_null
+
+      - name: price_usd
+        data_tests:
+          - not_null
+
+      - name: price_source
+        data_tests:
+          - not_null

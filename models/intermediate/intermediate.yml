@@ -234,8 +234,8 @@ models:
   - name: int_offerbook_loans_enriched
     description: >
       Offerbook loan originations enriched with token
-      metadata, normalized token amounts and hourly
-      historical USD prices.
+      metadata, normalized token amounts and daily
+      historical USD reference prices.
 
     columns:
 
@@ -256,7 +256,7 @@ models:
         data_tests:
           - not_null
 
-      - name: price_hour
+      - name: price_DATE
         data_tests:
           - not_null
 
@@ -475,8 +475,8 @@ models:
   - name: int_offerbook_loan_repayments_enriched
     description: >
       Offerbook repayment events enriched with token metadata,
-      normalized amounts and point-in-time token prices at the
-      repayment timestamp.
+      normalized amounts and daily historical USD reference
+      prices for the repayment UTC date.
 
     columns:
 
@@ -501,11 +501,15 @@ models:
         data_tests:
           - not_null
 
+      - name: price_date
+        data_tests:
+          - not_null
+
   - name: int_offerbook_loan_defaults_enriched
     description: >
       Offerbook default events enriched with token metadata,
-      normalized amounts and point-in-time USD prices at the
-      default timestamp.
+      normalized amounts and daily historical USD reference
+      prices for the default UTC date.
 
     columns:
 
@@ -531,5 +535,9 @@ models:
           - not_null
 
       - name: collateral_asset_type
+        data_tests:
+          - not_null
+
+      - name: price_date
         data_tests:
           - not_null

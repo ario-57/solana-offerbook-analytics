@@ -7,10 +7,11 @@ with loans as (
     select
         *,
 
-        date_trunc(
-            'hour',
+        cast(
             loan_created_at
-        ) as price_hour
+                at time zone 'UTC'
+            as date
+        ) as price_date
 
     from {{ ref('int_offerbook_loans') }}
 
@@ -26,7 +27,7 @@ tokens as (
 prices as (
 
     select *
-    from {{ ref('stg_token_prices_hourly') }}
+    from {{ ref('stg_token_prices_daily') }}
 
 ),
 
@@ -57,7 +58,7 @@ final as (
         l.loan_expired_at,
         l.loan_updated_at,
 
-        l.price_hour,
+        l.price_date,
 
         --------------------------------------------------
         -- Participants
@@ -184,6 +185,25 @@ final as (
         cp.price_usd
             as collateral_price_usd,
 
+
+        pp.reference_event_at
+        as principal_price_reference_event_at,
+
+        cp.reference_event_at
+            as collateral_price_reference_event_at,
+
+        pp.provider_price_at
+            as principal_provider_price_at,
+
+        cp.provider_price_at
+            as collateral_provider_price_at,
+
+        pp.price_source
+            as principal_price_source,
+
+        cp.price_source
+            as collateral_price_source,
+
         --------------------------------------------------
         -- USD amounts
         --------------------------------------------------
@@ -241,7 +261,12 @@ final as (
             when pp.price_usd is null
                 then 'missing'
 
-            else 'exact_hour'
+            when pp.price_source =
+                'fixed_usd_stablecoin'
+                then 'fixed_stablecoin'
+
+            else 'daily_reference'
+
         end as principal_price_status,
 
         case
@@ -251,7 +276,12 @@ final as (
             when cp.price_usd is null
                 then 'missing'
 
-            else 'exact_hour'
+            when cp.price_source =
+                'fixed_usd_stablecoin'
+                then 'fixed_stablecoin'
+
+            else 'daily_reference'
+
         end as collateral_price_status,
 
         --------------------------------------------------
@@ -295,10 +325,10 @@ final as (
 
     left join prices as pp
         on l.principal_mint =
-           pp.mint_address
+        pp.mint_address
 
-        and l.price_hour =
-            pp.price_hour
+        and l.price_date =
+            pp.price_date
 
     ------------------------------------------------------
     -- Collateral hourly price
@@ -306,10 +336,10 @@ final as (
 
     left join prices as cp
         on l.collateral_mint =
-           cp.mint_address
+        cp.mint_address
 
-        and l.price_hour =
-            cp.price_hour
+        and l.price_date =
+            cp.price_date
 
 )
 

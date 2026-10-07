@@ -88,6 +88,29 @@ sources:
             data_tests:
               - not_null
 
+
+      - name: token_prices_daily
+        description: >
+          One historical USD reference price per token
+          per UTC date used by Offerbook analytics.
+
+        columns:
+          - name: mint_address
+            data_tests:
+              - not_null
+
+          - name: price_date
+            data_tests:
+              - not_null
+
+          - name: price_usd
+            data_tests:
+              - not_null
+
+          - name: price_source
+            data_tests:
+              - not_null
+
   - name: offerbook_decoded
     schema: decoded
 
