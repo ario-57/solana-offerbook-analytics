@@ -295,14 +295,12 @@ final as (
             when latest_protocol_status = 'Fulfilled'
                 then 'Fulfilled'
 
-            when latest_protocol_status = 'PartiallyFilled'
-                then 'PartiallyFilled'
-
             when offer_expired_at is not null
              and offer_expired_at < current_timestamp
                 then 'Expired'
 
-            when coalesce(loan_count, 0) > 0
+            when latest_protocol_status = 'PartiallyFilled'
+              or coalesce(loan_count, 0) > 0
                 then 'PartiallyFilled'
 
             else 'Active'
@@ -310,17 +308,6 @@ final as (
 
         coalesce(loan_count, 0) > 0
             as has_fill,
-
-        lifecycle_status in (
-            'Active',
-            'PartiallyFilled'
-        ) as is_open,
-
-        lifecycle_status in (
-            'Fulfilled',
-            'Cancelled',
-            'Expired'
-        ) as is_closed,
 
         date_diff(
             'second',
@@ -400,7 +387,26 @@ final as (
         end as is_stale_30d
 
     from combined
+),
+
+status_flags as (
+
+    select
+        *,
+
+        lifecycle_status in (
+            'Active',
+            'PartiallyFilled'
+        ) as is_open,
+
+        lifecycle_status in (
+            'Fulfilled',
+            'Cancelled',
+            'Expired'
+        ) as is_closed
+
+    from final
 )
 
 select *
-from final
+from status_flags
