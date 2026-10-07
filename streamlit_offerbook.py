@@ -312,7 +312,218 @@ def _chart_axis(value_kind: str, title: str | None = None):
     if value_kind == "usd":
         return alt.Axis(
             title=title,
-            labelExpr="'
+            labelExpr="'$' + format(datum.value, '~s')",
+            gridOpacity=0.18,
+        )
+    if value_kind == "percent":
+        return alt.Axis(
+            title=title,
+            labelExpr="format(datum.value, '.1f') + '%'",
+            gridOpacity=0.18,
+        )
+    if value_kind == "count":
+        return alt.Axis(
+            title=title,
+            format="~s",
+            tickMinStep=1,
+            gridOpacity=0.18,
+        )
+    return alt.Axis(title=title, gridOpacity=0.18)
+
+
+def _tooltip_format(value_kind: str) -> str:
+    """Return Vega-Lite numeric tooltip format strings."""
+    if value_kind == "usd":
+        return "$,.2f"
+    if value_kind == "percent":
+        return ",.1f"
+    if value_kind == "count":
+        return ",.0f"
+    return ",.2f"
+
+
+def _display_value(value, value_kind: str) -> str:
+    """Return a compact label for values printed directly on bar charts."""
+    if value_kind == "usd":
+        return usd_text(value)
+    if value_kind == "percent":
+        return percent_text(value)
+    if value_kind == "count":
+        return count_text(value)
+    return compact_number_text(value)
+
+
+def time_series_chart(
+    df: pd.DataFrame,
+    y_columns: list[str],
+    *,
+    value_kind: str = "count",
+    y_title: str | None = None,
+    mark: str = "line",
+):
+    """Render a clean time series with compact axes and exact hover values."""
+    if df.empty:
+        return
+
+    data = date_ready(df)
+    for column in y_columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+
+    long = data.melt(
+        id_vars=["block_date"],
+        value_vars=y_columns,
+        var_name="Series",
+        value_name="Value",
+    ).dropna(subset=["Value"])
+
+    if long.empty:
+        st.info("No values are available for this chart.")
+        return
+
+    base = alt.Chart(long).encode(
+        x=alt.X(
+            "block_date:T",
+            title=None,
+            axis=alt.Axis(format="%b %d", labelAngle=0),
+        ),
+        y=alt.Y(
+            "Value:Q",
+            title=y_title,
+            axis=_chart_axis(value_kind, y_title),
+        ),
+        color=alt.Color("Series:N", title=None),
+        tooltip=[
+            alt.Tooltip("block_date:T", title="Date", format="%b %d, %Y"),
+            alt.Tooltip("Series:N", title="Series"),
+            alt.Tooltip(
+                "Value:Q",
+                title=y_title or "Value",
+                format=_tooltip_format(value_kind),
+            ),
+        ],
+    )
+
+    if mark == "bar":
+        chart = base.mark_bar()
+    else:
+        chart = base.mark_line(point=alt.OverlayMarkDef(size=40, filled=True))
+
+    st.altair_chart(
+        chart.properties(height=320),
+        use_container_width=True,
+    )
+
+
+def labeled_bar_chart(
+    df: pd.DataFrame,
+    category: str,
+    value: str,
+    *,
+    value_kind: str = "count",
+    axis_title: str | None = None,
+    horizontal: bool = True,
+):
+    """Render bars with compact direct labels and exact hover values."""
+    if df.empty:
+        st.info("No values are available for this chart.")
+        return
+
+    data = df.copy()
+    data[value] = pd.to_numeric(data[value], errors="coerce")
+    data = data.dropna(subset=[category, value])
+
+    if data.empty:
+        st.info("No values are available for this chart.")
+        return
+
+    data["display_value"] = data[value].map(
+        lambda x: _display_value(x, value_kind)
+    )
+
+    tooltip = [
+        alt.Tooltip(f"{category}:N", title="Category"),
+        alt.Tooltip(
+            f"{value}:Q",
+            title=axis_title or value,
+            format=_tooltip_format(value_kind),
+        ),
+    ]
+
+    if horizontal:
+        bars = alt.Chart(data).mark_bar().encode(
+            y=alt.Y(
+                f"{category}:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=220),
+            ),
+            x=alt.X(
+                f"{value}:Q",
+                title=axis_title,
+                axis=_chart_axis(value_kind, axis_title),
+            ),
+            tooltip=tooltip,
+        )
+
+        labels = bars.mark_text(
+            align="left",
+            baseline="middle",
+            dx=4,
+            fontSize=12,
+        ).encode(
+            text=alt.Text("display_value:N")
+        )
+
+    else:
+        bars = alt.Chart(data).mark_bar().encode(
+            x=alt.X(
+                f"{category}:N",
+                sort="-y",
+                title=None,
+                axis=alt.Axis(labelAngle=0),
+            ),
+            y=alt.Y(
+                f"{value}:Q",
+                title=axis_title,
+                axis=_chart_axis(value_kind, axis_title),
+            ),
+            tooltip=tooltip,
+        )
+
+        labels = bars.mark_text(
+            align="center",
+            baseline="bottom",
+            dy=-4,
+            fontSize=12,
+        ).encode(
+            text=alt.Text("display_value:N")
+        )
+
+    st.altair_chart(
+        (bars + labels).properties(height=320),
+        use_container_width=True,
+    )
+
+
+def chart_volume(daily: pd.DataFrame, amount_column: str, title: str):
+    """Daily USD chart with compact axis and exact-value hover tooltips."""
+    volume = date_ready(daily)
+    volume[title] = pd.to_numeric(volume[amount_column], errors="coerce")
+
+    if (
+        "originated_loans" in volume.columns
+        and amount_column == "origination_volume_usd"
+    ):
+        volume.loc[volume["originated_loans"].eq(0), title] = 0
+
+    time_series_chart(
+        volume,
+        [title],
+        value_kind="usd",
+        y_title="USD",
+        mark="bar",
+    )
+
 
 # ----------------------------------------------------------
 # Dashboard pages
