@@ -186,7 +186,7 @@ def load_offer_efficiency(days: int | None) -> pd.DataFrame:
             avg_apy_raw,
             avg_duration_raw
         from main.mart_offerbook_offer_efficiency_daily
-        ${clause}
+        {clause}
         order by block_date, offers_created desc
     """, parameters)
 
