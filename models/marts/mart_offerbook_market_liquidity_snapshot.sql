@@ -43,23 +43,6 @@ market as (
             case when is_stale_30d then 1 end
         ) as stale_30d_offers,
 
-        sum(remaining_principal_usd)
-            as open_principal_usd,
-
-        sum(
-            case
-                when is_stale_7d
-                then remaining_principal_usd
-            end
-        ) as stale_7d_principal_usd,
-
-        sum(
-            case
-                when is_stale_30d
-                then remaining_principal_usd
-            end
-        ) as stale_30d_principal_usd,
-
         median(
             offer_age_seconds
         ) as median_open_offer_age_seconds,
@@ -115,16 +98,6 @@ select
     100.0
     * stale_30d_offers
     / nullif(open_offers, 0)
-        as stale_30d_offer_pct,
-
-    100.0
-    * stale_7d_principal_usd
-    / nullif(open_principal_usd, 0)
-        as stale_7d_liquidity_pct,
-
-    100.0
-    * stale_30d_principal_usd
-    / nullif(open_principal_usd, 0)
-        as stale_30d_liquidity_pct
+        as stale_30d_offer_pct
 
 from market
