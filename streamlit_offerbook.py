@@ -158,6 +158,64 @@ def load_activity(days: int | None) -> pd.DataFrame:
     """, parameters)
 
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_offer_efficiency(days: int | None) -> pd.DataFrame:
+    """Offer-creation cohorts by market and creator role."""
+    clause, parameters = date_filter(days)
+    return read_motherduck(f"""
+        select
+            block_date,
+            principal_asset_key,
+            collateral_asset_key,
+            creator_role,
+            market_name,
+            offers_created,
+            offers_with_fill,
+            fulfilled_offers,
+            partially_filled_offers,
+            cancelled_offers,
+            expired_offers,
+            active_offers,
+            stale_7d_offers,
+            stale_30d_offers,
+            unique_offer_creators,
+            loans_created_from_offers,
+            avg_principal_fill_ratio,
+            avg_seconds_to_first_fill,
+            avg_apy_raw,
+            avg_duration_raw
+        from main.mart_offerbook_offer_efficiency_daily
+        {clause}
+        order by block_date, offers_created desc
+    """, parameters)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_market_liquidity_snapshot() -> pd.DataFrame:
+    """Current open-offer staleness and terms by market and creator role."""
+    return read_motherduck("""
+        select
+            snapshot_at,
+            principal_asset_key,
+            collateral_asset_key,
+            creator_role,
+            market_name,
+            open_offers,
+            active_offer_creators,
+            stale_7d_offers,
+            stale_30d_offers,
+            median_open_offer_age_seconds,
+            p90_open_offer_age_seconds,
+            median_open_apy_raw,
+            median_open_duration_raw,
+            stale_7d_offer_pct,
+            stale_30d_offer_pct
+        from main.mart_offerbook_market_liquidity_snapshot
+        order by open_offers desc
+    """)
+
+
 # ----------------------------------------------------------
 # Presentation / numerical helpers
 # ----------------------------------------------------------
@@ -179,6 +237,19 @@ def usd_text(value) -> str:
     if absolute >= 1_000:
         return f"${value / 1_000:,.1f}K"
     return f"${value:,.2f}"
+
+
+
+def elapsed_text(seconds) -> str:
+    """Format elapsed seconds for offer fill/age metrics."""
+    if pd.isna(seconds):
+        return "N/A"
+    seconds = float(seconds)
+    if seconds < 3_600:
+        return f"{seconds / 60:,.0f} min"
+    if seconds < 86_400:
+        return f"{seconds / 3_600:,.1f} h"
+    return f"{seconds / 86_400:,.1f} days"
 
 
 def sum_count(df: pd.DataFrame, column: str) -> int:
@@ -427,6 +498,237 @@ def render_markets(markets: pd.DataFrame, window: str):
     st.caption("Market totals aggregate additive daily events, not outstanding positions. Distinct daily lender counts are deliberately not summed across dates.")
 
 
+
+def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, window: str):
+    """User-facing offer quality plus developer-facing matching friction."""
+    st.subheader(f"Offer Insights · {window}")
+    st.caption(
+        "Offer analytics are token-native and do not require additional Birdeye pricing. "
+        "The selected period applies to offer creation cohorts; open-liquidity metrics are current."
+    )
+
+    role_label = st.selectbox(
+        "Offer creator side",
+        ["All creators", "Lender-side offers", "Borrower-side offers"],
+        index=0,
+    )
+    role_map = {
+        "All creators": None,
+        "Lender-side offers": "lender",
+        "Borrower-side offers": "borrower",
+    }
+    role = role_map[role_label]
+
+    eff = efficiency.copy()
+    liq = liquidity.copy()
+    if role is not None:
+        eff = eff[eff["creator_role"].eq(role)].copy()
+        liq = liq[liq["creator_role"].eq(role)].copy()
+
+    st.markdown("### User view")
+    if eff.empty:
+        st.info("No offers were created for this side in the selected period.")
+    else:
+        for column in [
+            "offers_created", "offers_with_fill", "fulfilled_offers",
+            "cancelled_offers", "expired_offers", "loans_created_from_offers",
+            "avg_seconds_to_first_fill", "avg_apy_raw", "avg_duration_raw",
+        ]:
+            eff[column] = pd.to_numeric(eff[column], errors="coerce")
+
+        offers = sum_count(eff, "offers_created")
+        with_fill = sum_count(eff, "offers_with_fill")
+        fulfilled = sum_count(eff, "fulfilled_offers")
+        cancelled = sum_count(eff, "cancelled_offers")
+        expired = sum_count(eff, "expired_offers")
+
+        fill_rate = 100 * with_fill / offers if offers else float("nan")
+        full_fill_rate = 100 * fulfilled / offers if offers else float("nan")
+        cancel_rate = 100 * cancelled / offers if offers else float("nan")
+        expiry_rate = 100 * expired / offers if offers else float("nan")
+
+        valid_fill = eff["offers_with_fill"].fillna(0).gt(0) & eff["avg_seconds_to_first_fill"].notna()
+        if valid_fill.any():
+            avg_fill_seconds = (
+                eff.loc[valid_fill, "avg_seconds_to_first_fill"]
+                * eff.loc[valid_fill, "offers_with_fill"]
+            ).sum() / eff.loc[valid_fill, "offers_with_fill"].sum()
+        else:
+            avg_fill_seconds = float("nan")
+
+        valid_apy = eff["offers_created"].fillna(0).gt(0) & eff["avg_apy_raw"].notna()
+        if valid_apy.any():
+            avg_apy_raw = (
+                eff.loc[valid_apy, "avg_apy_raw"]
+                * eff.loc[valid_apy, "offers_created"]
+            ).sum() / eff.loc[valid_apy, "offers_created"].sum()
+        else:
+            avg_apy_raw = float("nan")
+
+        a, b, c, d = st.columns(4)
+        a.metric("Offers created", count_text(offers))
+        b.metric("Reached a fill", "N/A" if pd.isna(fill_rate) else f"{fill_rate:.1f}%")
+        c.metric("Fully fulfilled", "N/A" if pd.isna(full_fill_rate) else f"{full_fill_rate:.1f}%")
+        d.metric("Avg time to first fill", elapsed_text(avg_fill_seconds))
+
+        e, f, g = st.columns(3)
+        e.metric("Average offered APY", "N/A" if pd.isna(avg_apy_raw) else f"{avg_apy_raw / 100:.2f}%")
+        f.metric("Cancelled", "N/A" if pd.isna(cancel_rate) else f"{cancel_rate:.1f}%")
+        g.metric("Expired", "N/A" if pd.isna(expiry_rate) else f"{expiry_rate:.1f}%")
+
+        daily = (
+            eff.groupby("block_date", as_index=False)[
+                ["offers_created", "offers_with_fill", "fulfilled_offers",
+                 "cancelled_offers", "expired_offers"]
+            ]
+            .sum()
+            .sort_values("block_date")
+        )
+        daily["fill_rate_pct"] = (
+            100 * daily["offers_with_fill"]
+            / daily["offers_created"].where(daily["offers_created"].ne(0))
+        )
+
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### Offer outcomes by creation date")
+            chart = date_ready(daily).rename(columns={
+                "offers_created": "Created",
+                "offers_with_fill": "Reached a fill",
+                "fulfilled_offers": "Fulfilled",
+                "cancelled_offers": "Cancelled",
+                "expired_offers": "Expired",
+            })
+            st.line_chart(
+                chart,
+                x="block_date",
+                y=["Created", "Reached a fill", "Fulfilled", "Cancelled", "Expired"],
+            )
+
+        with right:
+            st.markdown("#### Fill rate by creation date")
+            st.line_chart(date_ready(daily), x="block_date", y="fill_rate_pct")
+
+        market = (
+            eff.groupby(
+                ["principal_asset_key", "collateral_asset_key", "market_name"],
+                as_index=False,
+            )
+            .agg(
+                offers_created=("offers_created", "sum"),
+                offers_with_fill=("offers_with_fill", "sum"),
+                fulfilled_offers=("fulfilled_offers", "sum"),
+                cancelled_offers=("cancelled_offers", "sum"),
+                expired_offers=("expired_offers", "sum"),
+                loans_created=("loans_created_from_offers", "sum"),
+            )
+        )
+        market["fill_rate_pct"] = (
+            100 * market["offers_with_fill"]
+            / market["offers_created"].where(market["offers_created"].ne(0))
+        )
+        market["cancel_rate_pct"] = (
+            100 * market["cancelled_offers"]
+            / market["offers_created"].where(market["offers_created"].ne(0))
+        )
+        market["expiry_rate_pct"] = (
+            100 * market["expired_offers"]
+            / market["offers_created"].where(market["offers_created"].ne(0))
+        )
+
+        st.markdown("#### Market fill performance")
+        st.dataframe(
+            market.sort_values("offers_created", ascending=False),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    st.markdown("### Developer view")
+    if liq.empty:
+        st.info("No currently open offers were found for this side.")
+    else:
+        for column in [
+            "open_offers", "stale_7d_offers", "stale_30d_offers",
+            "median_open_offer_age_seconds", "stale_7d_offer_pct",
+            "stale_30d_offer_pct",
+        ]:
+            liq[column] = pd.to_numeric(liq[column], errors="coerce")
+
+        open_offers = sum_count(liq, "open_offers")
+        stale7 = sum_count(liq, "stale_7d_offers")
+        stale30 = sum_count(liq, "stale_30d_offers")
+        stale7_pct = 100 * stale7 / open_offers if open_offers else float("nan")
+        stale30_pct = 100 * stale30 / open_offers if open_offers else float("nan")
+
+        valid_age = liq["open_offers"].fillna(0).gt(0) & liq["median_open_offer_age_seconds"].notna()
+        if valid_age.any():
+            typical_age = (
+                liq.loc[valid_age, "median_open_offer_age_seconds"]
+                * liq.loc[valid_age, "open_offers"]
+            ).sum() / liq.loc[valid_age, "open_offers"].sum()
+        else:
+            typical_age = float("nan")
+
+        a, b, c, d = st.columns(4)
+        a.metric("Open offers", count_text(open_offers))
+        b.metric("Stale >7d", "N/A" if pd.isna(stale7_pct) else f"{stale7_pct:.1f}%")
+        c.metric("Stale >30d", "N/A" if pd.isna(stale30_pct) else f"{stale30_pct:.1f}%")
+        d.metric("Typical open-offer age", elapsed_text(typical_age))
+
+        market_liq = (
+            liq.groupby(
+                ["principal_asset_key", "collateral_asset_key", "market_name"],
+                as_index=False,
+            )
+            .agg(
+                open_offers=("open_offers", "sum"),
+                stale_7d_offers=("stale_7d_offers", "sum"),
+                stale_30d_offers=("stale_30d_offers", "sum"),
+            )
+        )
+        market_liq["stale_7d_pct"] = (
+            100 * market_liq["stale_7d_offers"]
+            / market_liq["open_offers"].where(market_liq["open_offers"].ne(0))
+        )
+        market_liq["stale_30d_pct"] = (
+            100 * market_liq["stale_30d_offers"]
+            / market_liq["open_offers"].where(market_liq["open_offers"].ne(0))
+        )
+
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### Markets with the most open offers")
+            st.bar_chart(
+                market_liq.sort_values("open_offers", ascending=False).head(12),
+                x="market_name",
+                y="open_offers",
+            )
+
+        with right:
+            st.markdown("#### Highest stale-offer share")
+            attention = market_liq[market_liq["open_offers"].ge(3)].sort_values(
+                ["stale_7d_pct", "open_offers"],
+                ascending=[False, False],
+            ).head(12)
+            if attention.empty:
+                st.info("No markets with at least 3 open offers are available.")
+            else:
+                st.bar_chart(attention, x="market_name", y="stale_7d_pct")
+
+        st.markdown("#### Markets that may need matching work")
+        attention = market_liq[market_liq["open_offers"].ge(3)].sort_values(
+            ["stale_7d_pct", "open_offers"],
+            ascending=[False, False],
+        )
+        st.dataframe(attention, hide_index=True, use_container_width=True)
+
+    st.info(
+        "Recent offer cohorts are right-censored: newer offers have had less time to fill, "
+        "cancel, or expire. A later iteration should add fixed-horizon fill metrics such as "
+        "filled within 1h / 24h / 7d."
+    )
+
+
 def render_activity(activity: pd.DataFrame, window: str):
     """Summarize program-instruction activity without double-counting transactions."""
     st.subheader(f"Protocol instruction activity · {window}")
@@ -479,7 +781,7 @@ def main():
     st.sidebar.header("Explore Offerbook")
     page = st.sidebar.radio(
         "Section",
-        ["Overview", "Lending", "Loan Lifecycle", "Markets", "Protocol Activity"],
+        ["Overview", "Lending", "Loan Lifecycle", "Markets", "Offer Insights", "Protocol Activity"],
     )
     label = st.sidebar.selectbox("Time window", list(WINDOWS), index=1)
     days = WINDOWS[label]
@@ -487,7 +789,8 @@ def main():
     if st.sidebar.button("Refresh MotherDuck data"):
         for loader in (
             load_snapshot, load_daily_lifecycle, load_daily_lending,
-            load_markets, load_activity,
+            load_markets, load_offer_efficiency, load_market_liquidity_snapshot,
+            load_activity,
         ):
             loader.clear()
 
@@ -503,6 +806,12 @@ def main():
                 render_lifecycle(load_snapshot(), load_daily_lifecycle(days), label)
             elif page == "Markets":
                 render_markets(load_markets(days), label)
+            elif page == "Offer Insights":
+                render_offer_insights(
+                    load_offer_efficiency(days),
+                    load_market_liquidity_snapshot(),
+                    label,
+                )
             else:
                 render_activity(load_activity(days), label)
     except Exception as exc:
