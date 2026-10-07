@@ -541,3 +541,89 @@ models:
       - name: price_date
         data_tests:
           - not_null
+
+  - name: int_offerbook_offer_events
+    description: >
+      Canonical Offerbook state-change events parsed from
+      OfferCreated, OfferFilled and OfferCancelled event versions.
+      One row represents one decoded offer event.
+    columns:
+      - name: offer_address
+        data_tests:
+          - not_null
+
+      - name: event_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - created
+                  - filled
+                  - cancelled
+
+      - name: offer_side
+        data_tests:
+          - not_null
+
+      - name: offer_created_at
+        data_tests:
+          - not_null
+
+      - name: principal_asset_key
+        data_tests:
+          - not_null
+
+      - name: collateral_asset_key
+        data_tests:
+          - not_null
+
+  - name: int_offerbook_offer_lifecycle
+    description: >
+      One row per Offerbook offer combining creation, fill,
+      cancellation and expiration state with resulting loans.
+      Provides fill timing, utilization and stale-liquidity fields.
+    columns:
+      - name: offer_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: offer_created_at
+        data_tests:
+          - not_null
+
+      - name: creator_role
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - lender
+                  - borrower
+                  - unknown
+
+      - name: lifecycle_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Active
+                  - PartiallyFilled
+                  - Fulfilled
+                  - Cancelled
+                  - Expired
+
+      - name: is_open
+        data_tests:
+          - not_null
+
+      - name: is_closed
+        data_tests:
+          - not_null
+
+      - name: has_fill
+        data_tests:
+          - not_null
+

@@ -215,3 +215,65 @@ models:
       - name: collateral_asset_key
         data_tests:
           - not_null
+
+  - name: mart_offerbook_offer_efficiency_daily
+    description: >
+      Offer-creation cohorts by UTC date, market and creator role.
+      Measures eventual fill/cancel/expiry outcomes, capital utilization,
+      and time to first fill. Recent cohorts are right-censored because
+      open offers have had less time to resolve.
+    columns:
+      - name: block_date
+        data_tests:
+          - not_null
+
+      - name: principal_asset_key
+        data_tests:
+          - not_null
+
+      - name: collateral_asset_key
+        data_tests:
+          - not_null
+
+      - name: creator_role
+        data_tests:
+          - not_null
+
+      - name: offers_created
+        data_tests:
+          - not_null
+
+      - name: offers_with_fill
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_market_liquidity_snapshot
+    description: >
+      Current open Offerbook liquidity by market and creator role.
+      Includes stale-offer counts, remaining principal liquidity,
+      offer age and open APY distribution.
+    columns:
+      - name: snapshot_at
+        data_tests:
+          - not_null
+
+      - name: principal_asset_key
+        data_tests:
+          - not_null
+
+      - name: collateral_asset_key
+        data_tests:
+          - not_null
+
+      - name: creator_role
+        data_tests:
+          - not_null
+
+      - name: open_offers
+        data_tests:
+          - not_null
+
+      - name: active_offer_creators
+        data_tests:
+          - not_null
+
