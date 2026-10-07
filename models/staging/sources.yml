@@ -70,25 +70,6 @@ sources:
               - not_null
               - unique
       
-      - name: token_prices_hourly
-        description: >
-          Hourly historical USD token prices retrieved
-          from Birdeye for tokens used by Offerbook.
-
-        columns:
-          - name: mint_address
-            data_tests:
-              - not_null
-
-          - name: price_hour
-            data_tests:
-              - not_null
-
-          - name: price_usd
-            data_tests:
-              - not_null
-
-
       - name: token_prices_daily
         description: >
           One historical USD reference price per token
