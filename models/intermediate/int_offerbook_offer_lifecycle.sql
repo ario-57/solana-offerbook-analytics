@@ -109,22 +109,11 @@ loans as (
         sum(collateral_amount_raw)
             as filled_collateral_raw,
 
-        sum(principal_amount_usd)
-            as filled_principal_usd,
+        sum(principal_amount)
+            as filled_principal_amount,
 
-        count(
-            case
-                when principal_amount_usd is not null
-                then 1
-            end
-        ) as priced_loan_count,
-
-        count(
-            case
-                when principal_amount_usd is null
-                then 1
-            end
-        ) as unpriced_loan_count,
+        sum(collateral_amount)
+            as filled_collateral_amount,
 
         count(distinct lender_address)
             as unique_lenders,
@@ -137,7 +126,7 @@ loans as (
     group by 1
 ),
 
-created_prices as (
+creation_metadata as (
 
     select
         offer_address,
@@ -148,19 +137,13 @@ created_prices as (
         any_value(collateral_symbol)
             as collateral_symbol,
 
-        any_value(principal_notional_usd)
-            as offered_principal_usd,
+        any_value(principal_amount)
+            as offered_principal_amount,
 
-        any_value(collateral_notional_usd)
-            as offered_collateral_usd,
+        any_value(collateral_amount)
+            as offered_collateral_amount
 
-        any_value(principal_price_status)
-            as principal_price_status,
-
-        any_value(collateral_price_status)
-            as collateral_price_status
-
-    from {{ ref('int_offerbook_offer_creations_priced') }}
+    from {{ ref('int_offerbook_offer_creations_enriched') }}
 
     group by 1
 ),
@@ -246,13 +229,8 @@ combined as (
         coalesce(n.filled_collateral_raw, 0)
             as filled_collateral_raw,
 
-        n.filled_principal_usd,
-
-        coalesce(n.priced_loan_count, 0)
-            as priced_loan_count,
-
-        coalesce(n.unpriced_loan_count, 0)
-            as unpriced_loan_count,
+        n.filled_principal_amount,
+        n.filled_collateral_amount,
 
         coalesce(n.unique_lenders, 0)
             as unique_lenders,
@@ -260,12 +238,10 @@ combined as (
         coalesce(n.unique_borrowers, 0)
             as unique_borrowers,
 
-        p.principal_symbol,
-        p.collateral_symbol,
-        p.offered_principal_usd,
-        p.offered_collateral_usd,
-        p.principal_price_status,
-        p.collateral_price_status
+        m.principal_symbol,
+        m.collateral_symbol,
+        m.offered_principal_amount,
+        m.offered_collateral_amount
 
     from created as c
 
@@ -278,8 +254,8 @@ combined as (
     left join loans as n
         on c.offer_address = n.offer_address
 
-    left join created_prices as p
-        on c.offer_address = p.offer_address
+    left join creation_metadata as m
+        on c.offer_address = m.offer_address
 ),
 
 final as (
@@ -342,27 +318,13 @@ final as (
         end as principal_fill_ratio,
 
         case
-            when offered_principal_usd is not null
-             and offered_principal_usd != 0
-            then
-                least(
-                    1.0,
-                    greatest(
-                        0.0,
-                        filled_principal_usd
-                        / offered_principal_usd
-                    )
-                )
-        end as usd_fill_ratio,
-
-        case
-            when offered_principal_usd is not null
+            when offered_principal_amount is not null
             then greatest(
                 0,
-                offered_principal_usd
-                - coalesce(filled_principal_usd, 0)
+                offered_principal_amount
+                - coalesce(filled_principal_amount, 0)
             )
-        end as remaining_principal_usd,
+        end as remaining_principal_amount,
 
         case
             when lifecycle_status in ('Active', 'PartiallyFilled')
