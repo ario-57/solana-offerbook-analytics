@@ -68,15 +68,6 @@ daily as (
         sum(loan_count)
             as loans_created_from_offers,
 
-        sum(offered_principal_usd)
-            as offered_principal_usd,
-
-        sum(filled_principal_usd)
-            as filled_principal_usd,
-
-        sum(remaining_principal_usd)
-            as remaining_principal_usd,
-
         avg(principal_fill_ratio)
             as avg_principal_fill_ratio,
 
@@ -162,11 +153,6 @@ select
     100.0
     * expired_offers
     / nullif(offers_created, 0)
-        as expiry_rate_pct,
-
-    100.0
-    * filled_principal_usd
-    / nullif(offered_principal_usd, 0)
-        as capital_utilization_pct
+        as expiry_rate_pct
 
 from daily
