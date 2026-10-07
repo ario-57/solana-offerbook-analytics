@@ -270,7 +270,7 @@ def get_required_token_days(con):
           )
 
         order by
-            r.price_date,
+            r.price_date desc,
             r.mint_address
     """).fetchall()
 

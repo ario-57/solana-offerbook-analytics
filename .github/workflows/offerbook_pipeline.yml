@@ -37,6 +37,9 @@ jobs:
 
       DBT_PROFILES_DIR: .github/dbt
 
+      TOKEN_METADATA_MAX_REQUESTS: "10"
+      DAILY_PRICE_MAX_REQUESTS: "50"
+
       INCREMENTAL_MAX_TRANSACTIONS: "20000"
 
       DECODE_FULL_REFRESH: "0"
@@ -240,8 +243,24 @@ jobs:
 
           python -u -m ingestion.extract_token_mints
 
+      - name: Refresh Offerbook token metadata
+        run: |
+          python -u -m ingestion.extract_token_metadata \
+            --max-requests "$TOKEN_METADATA_MAX_REQUESTS"
+
+
+      
       # ==============================================
-      # Job 7: Downstream dbt transformations
+      # Job 8: Refresh Daily Token Prices
+      # ==============================================
+
+      - name: Refresh Offerbook daily token prices
+        run: |
+          python -u -m ingestion.extract_daily_token_prices \
+            --max-requests "$DAILY_PRICE_MAX_REQUESTS"
+
+      # ==============================================
+      # Job 9: Downstream dbt transformations
       # ==============================================
 
       - name: Build analytics models
@@ -250,8 +269,8 @@ jobs:
 
 
 
-            # ==============================================
-      # Job 8: Production Observability
+      # ==============================================
+      # Job 10: Production Observability
       # ==============================================
 
       - name: Report decoding quality
@@ -363,7 +382,7 @@ jobs:
 
 
       # ==============================================
-      # Job 9: Critical Production Data Quality
+      # Job 11: Critical Production Data Quality
       # ==============================================
 
       - name: Run critical dbt tests
@@ -372,12 +391,16 @@ jobs:
             --select \
             stg_offerbook_decoded_instructions \
             stg_offerbook_events \
+            stg_token_prices_daily \
             int_offerbook_offer_creations_enriched \
+            int_offerbook_loans_enriched \
+            int_offerbook_loan_repayments_enriched \
+            int_offerbook_loan_defaults_enriched \
             source:offerbook_decoded.offerbook_events \
             --threads 2
 
       # ==============================================
-      # Job 10: Record Pipeline Completion
+      # Job 12: Record Pipeline Completion
       # ==============================================
 
       - name: Record pipeline completion
