@@ -267,7 +267,244 @@ jobs:
         run: |
           dbt run --target prod
 
+      # ==============================================
+      # Pricing Observability
+      # ==============================================
 
+      - name: Report pricing coverage
+        run: |
+          python - <<'PY'
+          from ingestion.db import get_connection
+
+          con = get_connection()
+
+          try:
+              # --------------------------------------------------
+              # Loan origination pricing
+              # --------------------------------------------------
+
+              loan = con.execute("""
+                  select
+                      count(*) filter (
+                          where principal_asset_type = 'Token'
+                      ) as required,
+
+                      count(*) filter (
+                          where principal_asset_type = 'Token'
+                            and principal_price_usd is not null
+                      ) as priced
+
+                  from main.int_offerbook_loans_enriched
+              """).fetchone()
+
+              # --------------------------------------------------
+              # Repayment pricing
+              # --------------------------------------------------
+
+              repayment = con.execute("""
+                  select
+                      count(*) filter (
+                          where principal_asset_type = 'Token'
+                      ) as required,
+
+                      count(*) filter (
+                          where principal_asset_type = 'Token'
+                            and principal_price_usd_at_repayment
+                                is not null
+                      ) as priced
+
+                  from main.int_offerbook_loan_repayments_enriched
+              """).fetchone()
+
+              # --------------------------------------------------
+              # Default principal pricing
+              # --------------------------------------------------
+
+              default_principal = con.execute("""
+                  select
+                      count(*) filter (
+                          where principal_asset_type = 'Token'
+                      ) as required,
+
+                      count(*) filter (
+                          where principal_asset_type = 'Token'
+                            and principal_price_usd_at_default
+                                is not null
+                      ) as priced
+
+                  from main.int_offerbook_loan_defaults_enriched
+              """).fetchone()
+
+              # --------------------------------------------------
+              # Default collateral pricing
+              # --------------------------------------------------
+
+              default_collateral = con.execute("""
+                  select
+                      count(*) filter (
+                          where collateral_asset_type = 'Token'
+                      ) as required,
+
+                      count(*) filter (
+                          where collateral_asset_type = 'Token'
+                            and collateral_price_usd_at_default
+                                is not null
+                      ) as priced
+
+                  from main.int_offerbook_loan_defaults_enriched
+              """).fetchone()
+
+              # --------------------------------------------------
+              # Daily-price source breakdown
+              # --------------------------------------------------
+
+              price_sources = con.execute("""
+                  select
+                      price_source,
+                      count(*) as rows
+
+                  from raw.token_prices_daily
+
+                  group by 1
+                  order by rows desc
+              """).fetchall()
+
+              # --------------------------------------------------
+              # Metadata completeness
+              # --------------------------------------------------
+
+              missing_metadata = con.execute("""
+                  select count(*)
+
+                  from raw.token_mints as m
+
+                  left join raw.token_metadata as md
+                      on m.mint_address = md.mint_address
+
+                  where md.symbol is null
+              """).fetchone()[0]
+
+              def coverage(result):
+                  required, priced = result
+
+                  if not required:
+                      return 100.0
+
+                  return round(
+                      priced * 100.0 / required,
+                      2
+                  )
+
+              print("\n==============================")
+              print("Offerbook Pricing Quality")
+              print("==============================")
+
+              print(
+                  "Loan originations:",
+                  f"{loan[1]:,}/{loan[0]:,}",
+                  f"({coverage(loan):.2f}%)"
+              )
+
+              print(
+                  "Repayments:",
+                  f"{repayment[1]:,}/{repayment[0]:,}",
+                  f"({coverage(repayment):.2f}%)"
+              )
+
+              print(
+                  "Default principal:",
+                  f"{default_principal[1]:,}/"
+                  f"{default_principal[0]:,}",
+                  f"({coverage(default_principal):.2f}%)"
+              )
+
+              print(
+                  "Default collateral:",
+                  f"{default_collateral[1]:,}/"
+                  f"{default_collateral[0]:,}",
+                  f"({coverage(default_collateral):.2f}%)"
+              )
+
+              print(
+                  "Missing token symbols:",
+                  f"{missing_metadata:,}"
+              )
+
+              print("\nPrice sources:")
+
+              for source, rows in price_sources:
+                  print(
+                      f"  {source}: {rows:,}"
+                  )
+
+              # --------------------------------------------------
+              # GitHub Actions summary
+              # --------------------------------------------------
+
+              import os
+
+              summary_path = os.getenv(
+                  "GITHUB_STEP_SUMMARY"
+              )
+
+              if summary_path:
+
+                  lines = [
+                      "## Token Pricing Coverage",
+                      "",
+                      "| Dataset | Priced | Required | Coverage |",
+                      "|---|---:|---:|---:|",
+                      (
+                          f"| Loan originations | "
+                          f"{loan[1]:,} | {loan[0]:,} | "
+                          f"{coverage(loan):.2f}% |"
+                      ),
+                      (
+                          f"| Repayments | "
+                          f"{repayment[1]:,} | "
+                          f"{repayment[0]:,} | "
+                          f"{coverage(repayment):.2f}% |"
+                      ),
+                      (
+                          f"| Default principal | "
+                          f"{default_principal[1]:,} | "
+                          f"{default_principal[0]:,} | "
+                          f"{coverage(default_principal):.2f}% |"
+                      ),
+                      (
+                          f"| Default collateral | "
+                          f"{default_collateral[1]:,} | "
+                          f"{default_collateral[0]:,} | "
+                          f"{coverage(default_collateral):.2f}% |"
+                      ),
+                      "",
+                      (
+                          f"Missing token symbols: "
+                          f"**{missing_metadata:,}**"
+                      ),
+                      "",
+                      "### Price sources",
+                      "",
+                  ]
+
+                  for source, rows in price_sources:
+                      lines.append(
+                          f"- `{source}`: **{rows:,}** rows"
+                      )
+
+                  with open(
+                      summary_path,
+                      "a",
+                      encoding="utf-8",
+                  ) as file:
+                      file.write(
+                          "\n".join(lines) + "\n"
+                      )
+
+          finally:
+              con.close()
+
+          PY
 
       # ==============================================
       # Job 10: Production Observability
