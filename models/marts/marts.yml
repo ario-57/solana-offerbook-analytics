@@ -363,3 +363,68 @@ models:
       - name: defaulted_principal_usd
         description: >
           Principal value at default event prices for defaulted borrower loans.
+
+  - name: mart_offerbook_daily_execution
+    description: >
+      Daily transaction-level Offerbook execution health derived from the raw
+      Solana getTransaction payload. Includes compute units, fees, success rate
+      and transaction-complexity measures.
+    columns:
+      - name: block_date
+        data_tests:
+          - not_null
+          - unique
+
+      - name: transactions
+        data_tests:
+          - not_null
+
+      - name: successful_transactions
+        data_tests:
+          - not_null
+
+      - name: failed_transactions
+        data_tests:
+          - not_null
+
+      - name: total_compute_units
+        description: Sum of Solana transaction-level computeUnitsConsumed.
+
+      - name: successful_compute_units
+        description: Compute units consumed by successful transactions only.
+
+      - name: total_fee_lamports
+        description: Total transaction fees in lamports.
+
+  - name: mart_offerbook_instruction_execution_daily
+    description: >
+      Daily execution metrics by decoded top-level Offerbook instruction type.
+      Compute units and fees are transaction-associated, not exclusively
+      attributable to one instruction. A transaction containing multiple
+      Offerbook instruction types can contribute to multiple rows.
+    columns:
+      - name: block_date
+        data_tests:
+          - not_null
+
+      - name: instruction_name
+        data_tests:
+          - not_null
+
+      - name: instruction_count
+        data_tests:
+          - not_null
+
+      - name: transaction_count
+        data_tests:
+          - not_null
+
+      - name: associated_compute_units
+        description: >
+          Sum of full transaction compute units for transactions containing
+          this instruction type. Do not sum across instruction types.
+
+      - name: associated_fee_lamports
+        description: >
+          Sum of full transaction fees for transactions containing this
+          instruction type. Do not sum across instruction types.

@@ -276,6 +276,94 @@ def load_daily_lending(days: int | None) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def load_wallet_retention(days: int | None) -> pd.DataFrame:
+    """Daily new/returning wallet activity by lender, borrower and all roles."""
+    clause, parameters = date_filter(days)
+    return read_motherduck(f"""
+        select
+            block_date,
+            wallet_role,
+            active_wallets,
+            new_wallets,
+            returning_wallets,
+            new_wallet_share_pct,
+            returning_wallet_share_pct
+        from main.mart_offerbook_daily_wallet_retention
+        {clause}
+        order by block_date, wallet_role
+    """, parameters)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_lender_performance() -> pd.DataFrame:
+    """Lifetime lender-level Offerbook performance."""
+    return read_motherduck("""
+        select
+            wallet_address,
+            originated_loans,
+            active_loans,
+            repaid_loans,
+            defaulted_loans,
+            unique_borrowers,
+            origination_volume_usd,
+            priced_originated_loans,
+            avg_apy_pct,
+            median_apy_pct,
+            avg_duration_days,
+            total_extensions,
+            repayment_events,
+            priced_repayments,
+            repaid_principal_usd,
+            realized_interest_usd,
+            default_events,
+            priced_defaults,
+            defaulted_principal_usd,
+            collateral_value_at_default_usd,
+            default_rate_pct,
+            realized_interest_rate_pct,
+            origination_price_coverage_pct,
+            first_loan_at,
+            last_loan_at
+        from main.mart_offerbook_lender_performance
+        order by originated_loans desc
+    """)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_borrower_performance() -> pd.DataFrame:
+    """Lifetime borrower-level Offerbook performance."""
+    return read_motherduck("""
+        select
+            wallet_address,
+            originated_loans,
+            active_loans,
+            repaid_loans,
+            defaulted_loans,
+            unique_lenders,
+            borrowed_volume_usd,
+            priced_originated_loans,
+            avg_apy_pct,
+            median_apy_pct,
+            avg_duration_days,
+            total_extensions,
+            repayment_events,
+            priced_repayments,
+            repaid_principal_usd,
+            realized_interest_paid_usd,
+            default_events,
+            priced_defaults,
+            defaulted_principal_usd,
+            default_rate_pct,
+            realized_borrowing_cost_pct,
+            origination_price_coverage_pct,
+            first_loan_at,
+            last_loan_at
+        from main.mart_offerbook_borrower_performance
+        order by originated_loans desc
+    """)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
 def load_markets(days: int | None) -> pd.DataFrame:
     """Aggregate additive daily market metrics by stable asset-pair keys."""
     clause, parameters = date_filter(days)
@@ -308,6 +396,66 @@ def load_activity(days: int | None) -> pd.DataFrame:
         order by block_date, instruction_name
     """, parameters)
 
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_daily_execution(days: int | None) -> pd.DataFrame:
+    """Daily protocol execution health from raw Solana transactions."""
+    clause, parameters = date_filter(days)
+    return read_motherduck(f"""
+        select
+            block_date,
+            transactions,
+            successful_transactions,
+            failed_transactions,
+            success_rate_pct,
+            total_compute_units,
+            successful_compute_units,
+            avg_compute_units,
+            median_compute_units,
+            p90_compute_units,
+            transactions_with_compute_units,
+            total_fee_lamports,
+            total_fee_sol,
+            avg_fee_lamports,
+            median_fee_lamports,
+            avg_top_level_instructions,
+            avg_inner_instructions,
+            avg_accounts,
+            avg_log_messages,
+            p90_inner_instructions,
+            p90_accounts,
+            compute_units_per_successful_tx
+        from main.mart_offerbook_daily_execution
+        {clause}
+        order by block_date
+    """, parameters)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_instruction_execution(days: int | None) -> pd.DataFrame:
+    """Transaction-associated execution metrics by top-level instruction type."""
+    clause, parameters = date_filter(days)
+    return read_motherduck(f"""
+        select
+            block_date,
+            instruction_name,
+            instruction_count,
+            transaction_count,
+            successful_transactions,
+            failed_transactions,
+            success_rate_pct,
+            associated_compute_units,
+            avg_associated_compute_units,
+            median_associated_compute_units,
+            p90_associated_compute_units,
+            associated_fee_lamports,
+            associated_fee_sol,
+            median_associated_fee_lamports
+        from main.mart_offerbook_instruction_execution_daily
+        {clause}
+        order by block_date, transaction_count desc
+    """, parameters)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -391,6 +539,20 @@ def usd_text(value) -> str:
         return f"${value / 1_000:,.1f}K"
     return f"${value:,.2f}"
 
+
+
+def sol_text(value) -> str:
+    """Format SOL amounts without hiding small protocol fees."""
+    if pd.isna(value):
+        return "N/A"
+
+    value = float(value)
+
+    if abs(value) >= 1:
+        return f"{value:,.3f} SOL"
+    if abs(value) >= 0.001:
+        return f"{value:,.5f} SOL"
+    return f"{value:,.7f} SOL"
 
 
 def elapsed_text(seconds) -> str:
@@ -491,6 +653,17 @@ def short_asset_label(symbol, asset_key) -> str:
     if len(key) <= 14:
         return key
     return f"{key[:5]}…{key[-4:]}"
+
+
+def short_wallet_label(wallet_address) -> str:
+    """Compact Solana addresses for chart axes while keeping tables exact."""
+    if pd.isna(wallet_address):
+        return "Unknown wallet"
+
+    address = str(wallet_address)
+    if len(address) <= 14:
+        return address
+    return f"{address[:5]}…{address[-4:]}"
 
 
 def market_display_label(row) -> str:
@@ -972,6 +1145,457 @@ def render_lending(daily: pd.DataFrame, window: str):
     st.caption("Each participation count is distinct within one date; lenders and borrowers may overlap.")
 
 
+def render_participants(
+    retention: pd.DataFrame,
+    lenders: pd.DataFrame,
+    borrowers: pd.DataFrame,
+    window: str,
+):
+    """Show wallet growth plus lifetime lender and borrower performance."""
+    st.subheader(f"Participants · {window}")
+    st.caption(
+        "Wallet activity follows the selected period. Performance leaderboards "
+        "are lifetime because the participant marts aggregate each wallet's full loan history."
+    )
+
+    st.markdown("### Wallet activity")
+
+    if retention.empty:
+        st.info("No wallet activity was found in the selected period.")
+    else:
+        retention = retention.copy()
+
+        for column in [
+            "active_wallets",
+            "new_wallets",
+            "returning_wallets",
+            "new_wallet_share_pct",
+            "returning_wallet_share_pct",
+        ]:
+            retention[column] = pd.to_numeric(
+                retention[column],
+                errors="coerce",
+            )
+
+        role_label = st.selectbox(
+            "Wallet role",
+            ["All wallets", "Lenders", "Borrowers"],
+            index=0,
+            key="participant_wallet_role",
+        )
+        role_map = {
+            "All wallets": "all",
+            "Lenders": "lender",
+            "Borrowers": "borrower",
+        }
+        role = role_map[role_label]
+
+        role_daily = retention[
+            retention["wallet_role"].eq(role)
+        ].sort_values("block_date").copy()
+
+        if role_daily.empty:
+            st.info(f"No {role_label.lower()} activity was found in this period.")
+        else:
+            avg_active = role_daily["active_wallets"].mean()
+            avg_new = role_daily["new_wallets"].mean()
+            avg_returning = role_daily["returning_wallets"].mean()
+
+            active_wallet_days = role_daily["active_wallets"].sum()
+            returning_wallet_days = role_daily["returning_wallets"].sum()
+            returning_share = (
+                100 * returning_wallet_days / active_wallet_days
+                if active_wallet_days
+                else float("nan")
+            )
+
+            render_kpi_grid([
+                (
+                    "Avg active wallets / day",
+                    count_text(round(avg_active))
+                    if pd.notna(avg_active)
+                    else "N/A",
+                ),
+                (
+                    "Avg new wallets / day",
+                    count_text(round(avg_new))
+                    if pd.notna(avg_new)
+                    else "N/A",
+                ),
+                (
+                    "Avg returning / day",
+                    count_text(round(avg_returning))
+                    if pd.notna(avg_returning)
+                    else "N/A",
+                ),
+                (
+                    "Returning activity share",
+                    percent_text(returning_share),
+                ),
+            ])
+
+            left, right = st.columns(2)
+
+            with left:
+                st.markdown("#### New vs returning wallets")
+                wallet_trend = role_daily.rename(columns={
+                    "new_wallets": "New wallets",
+                    "returning_wallets": "Returning wallets",
+                })
+                time_series_chart(
+                    wallet_trend,
+                    ["New wallets", "Returning wallets"],
+                    value_kind="count",
+                    y_title="Wallets",
+                )
+
+            with right:
+                st.markdown("#### Returning share of daily activity")
+                share_trend = role_daily.rename(columns={
+                    "returning_wallet_share_pct": "Returning share",
+                })
+                time_series_chart(
+                    share_trend,
+                    ["Returning share"],
+                    value_kind="percent",
+                    y_title="Share",
+                )
+
+        role_comparison = retention.pivot_table(
+            index="block_date",
+            columns="wallet_role",
+            values="active_wallets",
+            aggfunc="sum",
+        ).reset_index()
+
+        rename_roles = {
+            "all": "All wallets",
+            "lender": "Lenders",
+            "borrower": "Borrowers",
+        }
+        role_comparison = role_comparison.rename(columns=rename_roles)
+        comparison_columns = [
+            column
+            for column in ["All wallets", "Lenders", "Borrowers"]
+            if column in role_comparison.columns
+        ]
+
+        if comparison_columns:
+            st.markdown("#### Daily active wallets by role")
+            time_series_chart(
+                role_comparison,
+                comparison_columns,
+                value_kind="count",
+                y_title="Wallets",
+            )
+
+        st.caption(
+            "New/returning status is role-aware: a wallet is new on its first-ever "
+            "observed Offerbook activity date for that role. Daily wallet counts are "
+            "not additive across dates."
+        )
+
+    st.markdown("### Lender performance · lifetime")
+
+    if lenders.empty:
+        st.info("No lender performance data is available.")
+    else:
+        lenders = lenders.copy()
+
+        lender_numeric = [
+            "originated_loans",
+            "active_loans",
+            "repaid_loans",
+            "defaulted_loans",
+            "unique_borrowers",
+            "origination_volume_usd",
+            "avg_apy_pct",
+            "median_apy_pct",
+            "realized_interest_usd",
+            "defaulted_principal_usd",
+            "default_rate_pct",
+        ]
+        for column in lender_numeric:
+            lenders[column] = pd.to_numeric(
+                lenders[column],
+                errors="coerce",
+            )
+
+        lender_loans = lenders["originated_loans"].fillna(0).sum()
+        lender_defaults = lenders["defaulted_loans"].fillna(0).sum()
+        lender_default_rate = (
+            100 * lender_defaults / lender_loans
+            if lender_loans
+            else float("nan")
+        )
+
+        render_kpi_grid([
+            ("Lender wallets", count_text(len(lenders))),
+            ("Funded loans", count_text(lender_loans)),
+            (
+                "Realized interest earned",
+                usd_text(lenders["realized_interest_usd"].sum(min_count=1)),
+            ),
+            ("Loan default rate", percent_text(lender_default_rate)),
+        ])
+
+        min_loans = st.selectbox(
+            "Minimum loans for APY rankings",
+            [1, 2, 3, 5, 10],
+            index=2,
+            key="participant_min_loans",
+        )
+
+        lenders["wallet_label"] = lenders["wallet_address"].map(
+            short_wallet_label
+        )
+
+        lender_left, lender_right = st.columns(2)
+
+        with lender_left:
+            st.markdown("#### Top lenders by realized interest")
+            top_interest = (
+                lenders.dropna(subset=["realized_interest_usd"])
+                .sort_values("realized_interest_usd", ascending=False)
+                .head(10)
+            )
+            labeled_bar_chart(
+                top_interest,
+                "wallet_label",
+                "realized_interest_usd",
+                value_kind="usd",
+                axis_title="Realized interest",
+            )
+
+        with lender_right:
+            st.markdown("#### Highest average lender APY")
+            top_lender_apy = (
+                lenders[
+                    lenders["originated_loans"].fillna(0).ge(min_loans)
+                ]
+                .dropna(subset=["avg_apy_pct"])
+                .sort_values("avg_apy_pct", ascending=False)
+                .head(10)
+            )
+            labeled_bar_chart(
+                top_lender_apy,
+                "wallet_label",
+                "avg_apy_pct",
+                value_kind="percent",
+                axis_title="Average APY",
+            )
+
+        st.markdown("#### Top lenders by funded volume")
+        top_lender_volume = (
+            lenders.dropna(subset=["origination_volume_usd"])
+            .sort_values("origination_volume_usd", ascending=False)
+            .head(10)
+        )
+        labeled_bar_chart(
+            top_lender_volume,
+            "wallet_label",
+            "origination_volume_usd",
+            value_kind="usd",
+            axis_title="Funded volume",
+        )
+
+        lender_table = lenders.sort_values(
+            ["realized_interest_usd", "originated_loans"],
+            ascending=[False, False],
+            na_position="last",
+        ).head(25).rename(columns={
+            "wallet_address": "Wallet",
+            "originated_loans": "Loans",
+            "unique_borrowers": "Borrowers",
+            "origination_volume_usd": "Funded volume USD",
+            "avg_apy_pct": "Avg APY (%)",
+            "median_apy_pct": "Median APY (%)",
+            "realized_interest_usd": "Realized interest USD",
+            "defaulted_principal_usd": "Defaulted principal USD",
+            "default_rate_pct": "Default rate (%)",
+        })
+
+        st.markdown("#### Lender leaderboard")
+        st.dataframe(
+            lender_table[[
+                "Wallet",
+                "Loans",
+                "Borrowers",
+                "Funded volume USD",
+                "Avg APY (%)",
+                "Median APY (%)",
+                "Realized interest USD",
+                "Defaulted principal USD",
+                "Default rate (%)",
+            ]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Loans": st.column_config.NumberColumn(format="%d"),
+                "Borrowers": st.column_config.NumberColumn(format="%d"),
+                "Funded volume USD": st.column_config.NumberColumn(format="$%.2f"),
+                "Avg APY (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "Median APY (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "Realized interest USD": st.column_config.NumberColumn(format="$%.2f"),
+                "Defaulted principal USD": st.column_config.NumberColumn(format="$%.2f"),
+                "Default rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            },
+        )
+
+        st.caption(
+            "Realized interest is gross interest observed on repaid loans. "
+            "Defaulted principal is shown separately and is not automatically treated "
+            "as a realized loss because collateral recovery is not modeled."
+        )
+
+    st.markdown("### Borrower performance · lifetime")
+
+    if borrowers.empty:
+        st.info("No borrower performance data is available.")
+    else:
+        borrowers = borrowers.copy()
+
+        borrower_numeric = [
+            "originated_loans",
+            "active_loans",
+            "repaid_loans",
+            "defaulted_loans",
+            "unique_lenders",
+            "borrowed_volume_usd",
+            "avg_apy_pct",
+            "median_apy_pct",
+            "realized_interest_paid_usd",
+            "defaulted_principal_usd",
+            "default_rate_pct",
+        ]
+        for column in borrower_numeric:
+            borrowers[column] = pd.to_numeric(
+                borrowers[column],
+                errors="coerce",
+            )
+
+        borrower_loans = borrowers["originated_loans"].fillna(0).sum()
+        borrower_defaults = borrowers["defaulted_loans"].fillna(0).sum()
+        borrower_default_rate = (
+            100 * borrower_defaults / borrower_loans
+            if borrower_loans
+            else float("nan")
+        )
+
+        render_kpi_grid([
+            ("Borrower wallets", count_text(len(borrowers))),
+            ("Borrowed loans", count_text(borrower_loans)),
+            (
+                "Realized interest paid",
+                usd_text(
+                    borrowers["realized_interest_paid_usd"].sum(min_count=1)
+                ),
+            ),
+            ("Loan default rate", percent_text(borrower_default_rate)),
+        ])
+
+        borrowers["wallet_label"] = borrowers["wallet_address"].map(
+            short_wallet_label
+        )
+
+        borrower_left, borrower_right = st.columns(2)
+
+        with borrower_left:
+            st.markdown("#### Top borrowers by borrowed volume")
+            top_borrowed = (
+                borrowers.dropna(subset=["borrowed_volume_usd"])
+                .sort_values("borrowed_volume_usd", ascending=False)
+                .head(10)
+            )
+            labeled_bar_chart(
+                top_borrowed,
+                "wallet_label",
+                "borrowed_volume_usd",
+                value_kind="usd",
+                axis_title="Borrowed volume",
+            )
+
+        with borrower_right:
+            st.markdown("#### Highest average borrower APY")
+            top_borrower_apy = (
+                borrowers[
+                    borrowers["originated_loans"].fillna(0).ge(min_loans)
+                ]
+                .dropna(subset=["avg_apy_pct"])
+                .sort_values("avg_apy_pct", ascending=False)
+                .head(10)
+            )
+            labeled_bar_chart(
+                top_borrower_apy,
+                "wallet_label",
+                "avg_apy_pct",
+                value_kind="percent",
+                axis_title="Average APY",
+            )
+
+        st.markdown("#### Top borrowers by realized interest paid")
+        top_interest_paid = (
+            borrowers.dropna(subset=["realized_interest_paid_usd"])
+            .sort_values("realized_interest_paid_usd", ascending=False)
+            .head(10)
+        )
+        labeled_bar_chart(
+            top_interest_paid,
+            "wallet_label",
+            "realized_interest_paid_usd",
+            value_kind="usd",
+            axis_title="Interest paid",
+        )
+
+        borrower_table = borrowers.sort_values(
+            ["borrowed_volume_usd", "originated_loans"],
+            ascending=[False, False],
+            na_position="last",
+        ).head(25).rename(columns={
+            "wallet_address": "Wallet",
+            "originated_loans": "Loans",
+            "unique_lenders": "Lenders",
+            "borrowed_volume_usd": "Borrowed volume USD",
+            "avg_apy_pct": "Avg APY (%)",
+            "median_apy_pct": "Median APY (%)",
+            "realized_interest_paid_usd": "Interest paid USD",
+            "defaulted_principal_usd": "Defaulted principal USD",
+            "default_rate_pct": "Default rate (%)",
+        })
+
+        st.markdown("#### Borrower leaderboard")
+        st.dataframe(
+            borrower_table[[
+                "Wallet",
+                "Loans",
+                "Lenders",
+                "Borrowed volume USD",
+                "Avg APY (%)",
+                "Median APY (%)",
+                "Interest paid USD",
+                "Defaulted principal USD",
+                "Default rate (%)",
+            ]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Loans": st.column_config.NumberColumn(format="%d"),
+                "Lenders": st.column_config.NumberColumn(format="%d"),
+                "Borrowed volume USD": st.column_config.NumberColumn(format="$%.2f"),
+                "Avg APY (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "Median APY (%)": st.column_config.NumberColumn(format="%.2f%%"),
+                "Interest paid USD": st.column_config.NumberColumn(format="$%.2f"),
+                "Defaulted principal USD": st.column_config.NumberColumn(format="$%.2f"),
+                "Default rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            },
+        )
+
+        st.caption(
+            "Average APY is contractual loan APY, not realized annualized cost. "
+            "Interest paid is observed only on repaid loans with available USD pricing."
+        )
+
+
 def render_lifecycle(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
     """Separate current loan states from events occurring during the filter."""
     st.subheader("Current lifecycle state · lifetime snapshot")
@@ -1416,57 +2040,423 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
     )
 
 
-def render_activity(activity: pd.DataFrame, window: str):
-    """Summarize program-instruction activity without double-counting transactions."""
-    st.subheader(f"Protocol instruction activity · {window}")
-    if activity.empty:
-        st.info("No instruction activity was found in this period.")
-        return
-
-    total = sum_count(activity, "instruction_count")
-    unknown = sum_count(
-        activity[activity["instruction_name"].eq("unknown")],
-        "instruction_count",
-    )
-    render_kpi_grid([
-        ("Instructions", count_text(total)),
-        ("Instruction categories", count_text(activity["instruction_name"].nunique())),
-        ("Unclassified", count_text(unknown)),
-    ])
-
-    daily = activity.groupby("block_date", as_index=False)["instruction_count"].sum()
-    st.markdown("#### Instructions per day")
-    time_series_chart(
-        daily.rename(columns={"instruction_count": "Instructions"}),
-        ["Instructions"],
-        value_kind="count",
-        y_title="Instructions",
-    )
-
-    rankings = (
-        activity.groupby("instruction_name", as_index=False)["instruction_count"]
-        .sum()
-        .sort_values("instruction_count", ascending=False)
-    )
-    left, right = st.columns(2)
-    with left:
-        st.markdown("#### Top instruction types")
-        labeled_bar_chart(
-            rankings.head(12),
-            "instruction_name",
-            "instruction_count",
-            value_kind="count",
-            axis_title="Instructions",
-        )
-    with right:
-        st.markdown("#### Full instruction breakdown")
-        st.dataframe(rankings, hide_index=True, use_container_width=True)
-
+def render_activity(
+    activity: pd.DataFrame,
+    execution: pd.DataFrame,
+    instruction_execution: pd.DataFrame,
+    window: str,
+):
+    """Show protocol usage together with Solana execution health."""
+    st.subheader(f"Protocol Activity · {window}")
     st.caption(
-        "Do not sum per-instruction-type transaction_count to estimate unique "
-        "protocol transactions: the same signature can contain multiple types. "
-        "This page counts instructions instead."
+        "Protocol-wide execution metrics come from the raw Solana transaction payload. "
+        "Instruction-type CU and fee metrics are transaction-associated rather than "
+        "exclusively attributable to one instruction."
     )
+
+    st.markdown("### Execution health")
+
+    if execution.empty:
+        st.info("No transaction execution data was found in this period.")
+    else:
+        execution = execution.copy()
+
+        execution_numeric = [
+            "transactions",
+            "successful_transactions",
+            "failed_transactions",
+            "total_compute_units",
+            "successful_compute_units",
+            "total_fee_lamports",
+            "total_fee_sol",
+            "avg_top_level_instructions",
+            "avg_inner_instructions",
+            "avg_accounts",
+            "avg_log_messages",
+            "median_compute_units",
+            "p90_compute_units",
+            "compute_units_per_successful_tx",
+        ]
+        for column in execution_numeric:
+            execution[column] = pd.to_numeric(
+                execution[column],
+                errors="coerce",
+            )
+
+        total_transactions = sum_count(execution, "transactions")
+        successful_transactions = sum_count(
+            execution,
+            "successful_transactions",
+        )
+        failed_transactions = sum_count(
+            execution,
+            "failed_transactions",
+        )
+        total_compute_units = sum_count(
+            execution,
+            "total_compute_units",
+        )
+        successful_compute_units = sum_count(
+            execution,
+            "successful_compute_units",
+        )
+        total_fee_sol = pd.to_numeric(
+            execution["total_fee_sol"],
+            errors="coerce",
+        ).sum(min_count=1)
+
+        success_rate = (
+            100 * successful_transactions / total_transactions
+            if total_transactions
+            else float("nan")
+        )
+        avg_cu_per_tx = (
+            total_compute_units / total_transactions
+            if total_transactions
+            else float("nan")
+        )
+        cu_per_success = (
+            successful_compute_units / successful_transactions
+            if successful_transactions
+            else float("nan")
+        )
+
+        render_kpi_grid([
+            ("Transactions", count_text(total_transactions)),
+            ("Success rate", percent_text(success_rate)),
+            ("Total compute units", compact_number_text(total_compute_units)),
+            ("Transaction fees", sol_text(total_fee_sol)),
+            ("Failed transactions", count_text(failed_transactions)),
+            ("Avg CU / tx", compact_number_text(avg_cu_per_tx)),
+            ("CU / successful tx", compact_number_text(cu_per_success)),
+        ])
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Compute consumption")
+            compute_chart = execution.rename(columns={
+                "total_compute_units": "Total CU",
+            })
+            time_series_chart(
+                compute_chart,
+                ["Total CU"],
+                value_kind="count",
+                y_title="Compute units",
+            )
+
+        with right:
+            st.markdown("#### Transaction success rate")
+            success_chart = execution.rename(columns={
+                "success_rate_pct": "Success rate",
+            })
+            time_series_chart(
+                success_chart,
+                ["Success rate"],
+                value_kind="percent",
+                y_title="Success rate",
+            )
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Compute-unit distribution")
+            cu_distribution = execution.rename(columns={
+                "median_compute_units": "Median CU",
+                "p90_compute_units": "P90 CU",
+            })
+            time_series_chart(
+                cu_distribution,
+                ["Median CU", "P90 CU"],
+                value_kind="count",
+                y_title="Compute units",
+            )
+
+        with right:
+            st.markdown("#### Transaction fees")
+            fee_chart = execution.rename(columns={
+                "total_fee_lamports": "Fees (lamports)",
+            })
+            time_series_chart(
+                fee_chart,
+                ["Fees (lamports)"],
+                value_kind="count",
+                y_title="Lamports",
+            )
+
+        st.markdown("#### Transaction complexity")
+
+        complexity = execution.copy()
+        transaction_weights = pd.to_numeric(
+            complexity["transactions"],
+            errors="coerce",
+        ).fillna(0)
+
+        def weighted_daily_average(column: str):
+            values = pd.to_numeric(
+                complexity[column],
+                errors="coerce",
+            )
+            valid = values.notna() & transaction_weights.gt(0)
+
+            if not valid.any():
+                return float("nan")
+
+            return (
+                values[valid] * transaction_weights[valid]
+            ).sum() / transaction_weights[valid].sum()
+
+        render_kpi_grid([
+            (
+                "Avg top-level instructions",
+                compact_number_text(
+                    weighted_daily_average("avg_top_level_instructions"),
+                    decimals=1,
+                ),
+            ),
+            (
+                "Avg inner instructions",
+                compact_number_text(
+                    weighted_daily_average("avg_inner_instructions"),
+                    decimals=1,
+                ),
+            ),
+            (
+                "Avg account footprint",
+                compact_number_text(
+                    weighted_daily_average("avg_accounts"),
+                    decimals=1,
+                ),
+            ),
+            (
+                "Avg log messages",
+                compact_number_text(
+                    weighted_daily_average("avg_log_messages"),
+                    decimals=1,
+                ),
+            ),
+        ])
+
+        complexity_chart = execution.rename(columns={
+            "avg_top_level_instructions": "Top-level instructions",
+            "avg_inner_instructions": "Inner instructions",
+            "avg_accounts": "Accounts",
+        })
+        time_series_chart(
+            complexity_chart,
+            ["Top-level instructions", "Inner instructions", "Accounts"],
+            value_kind="raw",
+            y_title="Average per transaction",
+        )
+
+    st.markdown("### Instruction activity")
+
+    if activity.empty:
+        st.info("No decoded instruction activity was found in this period.")
+    else:
+        total = sum_count(activity, "instruction_count")
+        unknown = sum_count(
+            activity[activity["instruction_name"].eq("unknown")],
+            "instruction_count",
+        )
+
+        render_kpi_grid([
+            ("Instructions", count_text(total)),
+            (
+                "Instruction categories",
+                count_text(activity["instruction_name"].nunique()),
+            ),
+            ("Unclassified", count_text(unknown)),
+        ])
+
+        daily = (
+            activity.groupby("block_date", as_index=False)["instruction_count"]
+            .sum()
+        )
+        st.markdown("#### Instructions per day")
+        time_series_chart(
+            daily.rename(columns={"instruction_count": "Instructions"}),
+            ["Instructions"],
+            value_kind="count",
+            y_title="Instructions",
+        )
+
+        rankings = (
+            activity.groupby(
+                "instruction_name",
+                as_index=False,
+            )["instruction_count"]
+            .sum()
+            .sort_values(
+                "instruction_count",
+                ascending=False,
+            )
+        )
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Top instruction types")
+            labeled_bar_chart(
+                rankings.head(12),
+                "instruction_name",
+                "instruction_count",
+                value_kind="count",
+                axis_title="Instructions",
+            )
+
+        with right:
+            st.markdown("#### Full instruction breakdown")
+            st.dataframe(
+                rankings,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    st.markdown("### Instruction reliability & resource intensity")
+
+    if instruction_execution.empty:
+        st.info("No instruction execution data was found in this period.")
+    else:
+        ix = instruction_execution.copy()
+
+        for column in [
+            "instruction_count",
+            "transaction_count",
+            "successful_transactions",
+            "failed_transactions",
+            "associated_compute_units",
+            "associated_fee_lamports",
+        ]:
+            ix[column] = pd.to_numeric(
+                ix[column],
+                errors="coerce",
+            )
+
+        by_instruction = (
+            ix.groupby("instruction_name", as_index=False)
+            .agg(
+                instruction_count=("instruction_count", "sum"),
+                transaction_count=("transaction_count", "sum"),
+                successful_transactions=("successful_transactions", "sum"),
+                failed_transactions=("failed_transactions", "sum"),
+                associated_compute_units=("associated_compute_units", "sum"),
+                associated_fee_lamports=("associated_fee_lamports", "sum"),
+            )
+        )
+
+        by_instruction["failure_rate_pct"] = (
+            100
+            * by_instruction["failed_transactions"]
+            / by_instruction["transaction_count"].where(
+                by_instruction["transaction_count"].ne(0)
+            )
+        )
+
+        by_instruction["avg_associated_cu_per_tx"] = (
+            by_instruction["associated_compute_units"]
+            / by_instruction["transaction_count"].where(
+                by_instruction["transaction_count"].ne(0)
+            )
+        )
+
+        by_instruction["avg_associated_fee_lamports"] = (
+            by_instruction["associated_fee_lamports"]
+            / by_instruction["transaction_count"].where(
+                by_instruction["transaction_count"].ne(0)
+            )
+        )
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Most compute-intensive instruction types")
+            compute_rank = (
+                by_instruction.dropna(
+                    subset=["avg_associated_cu_per_tx"]
+                )
+                .sort_values(
+                    "avg_associated_cu_per_tx",
+                    ascending=False,
+                )
+                .head(12)
+            )
+            labeled_bar_chart(
+                compute_rank,
+                "instruction_name",
+                "avg_associated_cu_per_tx",
+                value_kind="count",
+                axis_title="Associated CU / tx",
+            )
+
+        with right:
+            st.markdown("#### Highest failure rates")
+            failure_rank = (
+                by_instruction[
+                    by_instruction["transaction_count"].ge(3)
+                ]
+                .sort_values(
+                    ["failure_rate_pct", "transaction_count"],
+                    ascending=[False, False],
+                )
+                .head(12)
+            )
+
+            if failure_rank.empty:
+                st.info(
+                    "No instruction types with at least 3 transactions are available."
+                )
+            else:
+                labeled_bar_chart(
+                    failure_rank,
+                    "instruction_name",
+                    "failure_rate_pct",
+                    value_kind="percent",
+                    axis_title="Failure rate",
+                )
+
+        execution_table = by_instruction.sort_values(
+            "transaction_count",
+            ascending=False,
+        ).rename(columns={
+            "instruction_name": "Instruction",
+            "instruction_count": "Instructions",
+            "transaction_count": "Transactions",
+            "failed_transactions": "Failed tx",
+            "failure_rate_pct": "Failure rate (%)",
+            "avg_associated_cu_per_tx": "Associated CU / tx",
+            "avg_associated_fee_lamports": "Associated fee / tx (lamports)",
+        })
+
+        st.markdown("#### Instruction execution table")
+        st.dataframe(
+            execution_table[[
+                "Instruction",
+                "Instructions",
+                "Transactions",
+                "Failed tx",
+                "Failure rate (%)",
+                "Associated CU / tx",
+                "Associated fee / tx (lamports)",
+            ]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Instructions": st.column_config.NumberColumn(format="%d"),
+                "Transactions": st.column_config.NumberColumn(format="%d"),
+                "Failed tx": st.column_config.NumberColumn(format="%d"),
+                "Failure rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                "Associated CU / tx": st.column_config.NumberColumn(format="%.0f"),
+                "Associated fee / tx (lamports)": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+
+        st.caption(
+            "Compute units and fees in the instruction section belong to the full "
+            "transaction containing that instruction type. A transaction containing "
+            "multiple Offerbook instruction types contributes to each relevant type, "
+            "so these values must not be summed across instruction types."
+        )
 
 
 # ----------------------------------------------------------
@@ -1488,7 +2478,7 @@ def main():
     st.sidebar.header("Explore Offerbook")
     page = st.sidebar.radio(
         "Section",
-        ["Overview", "Lending", "Loan Lifecycle", "Markets", "Offer Insights", "Protocol Activity"],
+        ["Overview", "Lending", "Participants", "Loan Lifecycle", "Markets", "Offer Insights", "Protocol Activity"],
     )
     label = st.sidebar.selectbox("Time window", list(WINDOWS), index=1)
     days = WINDOWS[label]
@@ -1496,8 +2486,9 @@ def main():
     if st.sidebar.button("Refresh MotherDuck data"):
         for loader in (
             load_snapshot, load_daily_lifecycle, load_daily_lending,
+            load_wallet_retention, load_lender_performance, load_borrower_performance,
             load_markets, load_offer_efficiency, load_market_liquidity_snapshot,
-            load_activity,
+            load_activity, load_daily_execution, load_instruction_execution,
         ):
             loader.clear()
 
@@ -1509,6 +2500,13 @@ def main():
                 render_overview(load_snapshot(), load_daily_lifecycle(days), label)
             elif page == "Lending":
                 render_lending(load_daily_lending(days), label)
+            elif page == "Participants":
+                render_participants(
+                    load_wallet_retention(days),
+                    load_lender_performance(),
+                    load_borrower_performance(),
+                    label,
+                )
             elif page == "Loan Lifecycle":
                 render_lifecycle(load_snapshot(), load_daily_lifecycle(days), label)
             elif page == "Markets":
@@ -1520,7 +2518,12 @@ def main():
                     label,
                 )
             else:
-                render_activity(load_activity(days), label)
+                render_activity(
+                    load_activity(days),
+                    load_daily_execution(days),
+                    load_instruction_execution(days),
+                    label,
+                )
     except Exception as exc:
         st.error("Unable to load this page. Check your MotherDuck connection and that the dbt marts exist.")
         st.caption(f"Error type: {type(exc).__name__}")
