@@ -277,3 +277,89 @@ models:
         data_tests:
           - not_null
 
+  - name: mart_offerbook_daily_wallet_retention
+    description: >
+      Daily active Offerbook wallets split into new and returning users for
+      lender, borrower and all-wallet views. A wallet is new on its first-ever
+      observed Offerbook activity date for the relevant role.
+    columns:
+      - name: block_date
+        data_tests:
+          - not_null
+
+      - name: wallet_role
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - lender
+                  - borrower
+                  - all
+
+      - name: active_wallets
+        data_tests:
+          - not_null
+
+      - name: new_wallets
+        data_tests:
+          - not_null
+
+      - name: returning_wallets
+        data_tests:
+          - not_null
+
+  - name: mart_offerbook_lender_performance
+    description: >
+      Lifetime lender-level Offerbook performance. Includes loan count,
+      contractual APY, origination volume, realized interest on repaid loans,
+      default exposure and activity dates. Realized interest is not netted
+      against defaulted principal or collateral received.
+    columns:
+      - name: wallet_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: originated_loans
+        data_tests:
+          - not_null
+
+      - name: avg_apy_pct
+        description: Loan-count-weighted mean contractual APY in percentage points.
+
+      - name: realized_interest_usd
+        description: >
+          USD value of interest actually observed on repaid loans. This is
+          gross realized interest, not net economic profit after defaults.
+
+      - name: defaulted_principal_usd
+        description: >
+          Principal value at default event prices for loans that defaulted.
+          Kept separate from realized interest rather than treated as a loss.
+
+  - name: mart_offerbook_borrower_performance
+    description: >
+      Lifetime borrower-level Offerbook performance. Includes borrowing volume,
+      contractual APY, realized interest paid on repaid loans, defaults,
+      extensions and activity dates.
+    columns:
+      - name: wallet_address
+        data_tests:
+          - not_null
+          - unique
+
+      - name: originated_loans
+        data_tests:
+          - not_null
+
+      - name: avg_apy_pct
+        description: Loan-count-weighted mean contractual APY in percentage points.
+
+      - name: realized_interest_paid_usd
+        description: >
+          USD value of interest actually paid on observed repayments.
+
+      - name: defaulted_principal_usd
+        description: >
+          Principal value at default event prices for defaulted borrower loans.
