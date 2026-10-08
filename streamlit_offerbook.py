@@ -530,7 +530,7 @@ def time_series_chart(
     y_title: str | None = None,
     mark: str = "line",
 ):
-    """Render a clean time series with compact axes and exact hover values."""
+    """Render a polished interactive time series with shared-date hover."""
     if df.empty:
         return
 
@@ -549,49 +549,129 @@ def time_series_chart(
         st.info("No values are available for this chart.")
         return
 
-    base = alt.Chart(long).encode(
-        x=alt.X(
-            "block_date:T",
-            title=None,
-            axis=alt.Axis(format="%b %d", labelAngle=0),
-        ),
-        y=alt.Y(
-            "Value:Q",
-            title=y_title,
-            axis=_chart_axis(value_kind, y_title),
-        ),
-        tooltip=[
-            alt.Tooltip("block_date:T", title="Date", format="%b %d, %Y"),
-            alt.Tooltip("Series:N", title="Series"),
-            alt.Tooltip(
-                "Value:Q",
-                title=y_title or "Value",
-                format=_tooltip_format(value_kind),
-            ),
-        ],
+    nearest = alt.selection_point(
+        nearest=True,
+        on="pointerover",
+        fields=["block_date"],
+        empty=False,
+        clear="pointerout",
     )
 
-    if len(y_columns) > 1:
-        base = base.encode(
-            color=alt.Color(
-                "Series:N",
-                title=None,
-                legend=alt.Legend(
-                    orient="top",
-                    direction="horizontal",
-                    columns=3,
-                    symbolSize=70,
-                ),
+    x_encoding = alt.X(
+        "block_date:T",
+        title=None,
+        axis=alt.Axis(
+            format="%b %d",
+            labelAngle=0,
+            labelPadding=8,
+            tickSize=4,
+            grid=False,
+        ),
+    )
+
+    y_encoding = alt.Y(
+        "Value:Q",
+        title=y_title,
+        axis=_chart_axis(value_kind, y_title),
+    )
+
+    color_encoding = alt.Color(
+        "Series:N",
+        title=None,
+        legend=(
+            alt.Legend(
+                orient="top",
+                direction="horizontal",
+                columns=3,
+                symbolSize=70,
+                labelLimit=180,
+                offset=6,
             )
-        )
+            if len(y_columns) > 1
+            else None
+        ),
+    )
+
+    base = alt.Chart(long).encode(
+        x=x_encoding,
+        y=y_encoding,
+        color=color_encoding,
+    )
+
+    tooltip = [
+        alt.Tooltip("block_date:T", title="Date", format="%b %d, %Y"),
+        alt.Tooltip("Series:N", title="Metric"),
+        alt.Tooltip(
+            "Value:Q",
+            title=y_title or "Value",
+            format=_tooltip_format(value_kind),
+        ),
+    ]
 
     if mark == "bar":
-        chart = base.mark_bar()
+        bars = base.mark_bar(
+            cornerRadiusTopLeft=3,
+            cornerRadiusTopRight=3,
+        ).encode(
+            opacity=alt.condition(nearest, alt.value(1), alt.value(0.78)),
+            tooltip=tooltip,
+        )
+
+        selectors = (
+            alt.Chart(long)
+            .mark_point(opacity=0)
+            .encode(x=x_encoding)
+            .add_params(nearest)
+        )
+
+        rule = (
+            alt.Chart(long)
+            .mark_rule(strokeWidth=1)
+            .encode(
+                x=x_encoding,
+                opacity=alt.condition(nearest, alt.value(0.45), alt.value(0)),
+            )
+            .transform_filter(nearest)
+        )
+
+        chart = bars + selectors + rule
+
     else:
-        chart = base.mark_line(point=alt.OverlayMarkDef(size=36, filled=True))
+        lines = base.mark_line(
+            strokeWidth=2.4,
+            interpolate="monotone",
+        )
+
+        selectors = (
+            alt.Chart(long)
+            .mark_point(opacity=0)
+            .encode(x=x_encoding)
+            .add_params(nearest)
+        )
+
+        points = base.mark_point(
+            filled=True,
+            size=72,
+            strokeWidth=1.5,
+        ).encode(
+            opacity=alt.condition(nearest, alt.value(1), alt.value(0)),
+            tooltip=tooltip,
+        ).transform_filter(nearest)
+
+        rule = (
+            alt.Chart(long)
+            .mark_rule(strokeWidth=1)
+            .encode(
+                x=x_encoding,
+                opacity=alt.condition(nearest, alt.value(0.5), alt.value(0)),
+            )
+            .transform_filter(nearest)
+        )
+
+        chart = lines + selectors + points + rule
 
     st.altair_chart(
-        chart.properties(height=300),
+        chart.properties(height=300).configure_view(stroke=None),
         use_container_width=True,
     )
 
@@ -605,7 +685,7 @@ def labeled_bar_chart(
     axis_title: str | None = None,
     horizontal: bool = True,
 ):
-    """Render bars with compact direct labels and exact hover values."""
+    """Render bars with direct labels and polished hover highlighting."""
     if df.empty:
         st.info("No values are available for this chart.")
         return
@@ -622,6 +702,13 @@ def labeled_bar_chart(
         lambda x: _display_value(x, value_kind)
     )
 
+    hover = alt.selection_point(
+        fields=[category],
+        on="pointerover",
+        empty=False,
+        clear="pointerout",
+    )
+
     tooltip = [
         alt.Tooltip(f"{category}:N", title="Category"),
         alt.Tooltip(
@@ -632,57 +719,82 @@ def labeled_bar_chart(
     ]
 
     if horizontal:
-        bars = alt.Chart(data).mark_bar().encode(
+        base = alt.Chart(data).encode(
             y=alt.Y(
                 f"{category}:N",
                 sort="-x",
                 title=None,
-                axis=alt.Axis(labelLimit=220),
+                axis=alt.Axis(
+                    labelLimit=220,
+                    labelPadding=8,
+                    ticks=False,
+                    domain=False,
+                ),
             ),
             x=alt.X(
                 f"{value}:Q",
                 title=axis_title,
                 axis=_chart_axis(value_kind, axis_title),
             ),
-            tooltip=tooltip,
         )
 
-        labels = bars.mark_text(
+        bars = base.mark_bar(cornerRadiusEnd=4).encode(
+            opacity=alt.condition(hover, alt.value(1), alt.value(0.78)),
+            tooltip=tooltip,
+        ).add_params(hover)
+
+        labels = base.mark_text(
             align="left",
             baseline="middle",
-            dx=4,
+            dx=5,
             fontSize=12,
+            fontWeight=500,
         ).encode(
-            text=alt.Text("display_value:N")
+            text=alt.Text("display_value:N"),
+            opacity=alt.condition(hover, alt.value(1), alt.value(0.82)),
         )
 
     else:
-        bars = alt.Chart(data).mark_bar().encode(
+        base = alt.Chart(data).encode(
             x=alt.X(
                 f"{category}:N",
                 sort="-y",
                 title=None,
-                axis=alt.Axis(labelAngle=0),
+                axis=alt.Axis(
+                    labelAngle=0,
+                    labelPadding=8,
+                    ticks=False,
+                    domain=False,
+                ),
             ),
             y=alt.Y(
                 f"{value}:Q",
                 title=axis_title,
                 axis=_chart_axis(value_kind, axis_title),
             ),
-            tooltip=tooltip,
         )
 
-        labels = bars.mark_text(
+        bars = base.mark_bar(
+            cornerRadiusTopLeft=4,
+            cornerRadiusTopRight=4,
+        ).encode(
+            opacity=alt.condition(hover, alt.value(1), alt.value(0.78)),
+            tooltip=tooltip,
+        ).add_params(hover)
+
+        labels = base.mark_text(
             align="center",
             baseline="bottom",
-            dy=-4,
+            dy=-5,
             fontSize=12,
+            fontWeight=500,
         ).encode(
-            text=alt.Text("display_value:N")
+            text=alt.Text("display_value:N"),
+            opacity=alt.condition(hover, alt.value(1), alt.value(0.82)),
         )
 
     st.altair_chart(
-        (bars + labels).properties(height=320),
+        (bars + labels).properties(height=320).configure_view(stroke=None),
         use_container_width=True,
     )
 
