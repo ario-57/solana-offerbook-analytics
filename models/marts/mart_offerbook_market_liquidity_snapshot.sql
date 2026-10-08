@@ -20,10 +20,10 @@ with offers as (
     from {{ ref('int_offerbook_offer_lifecycle') }} as o
 
     left join {{ ref('int_tokens') }} as p
-        on o.principal_asset_key = p.mint_address
+        on split_part(o.principal_asset_key, ':', 2) = p.mint_address
 
     left join {{ ref('int_tokens') }} as c
-        on o.collateral_asset_key = c.mint_address
+        on split_part(o.collateral_asset_key, ':', 2) = c.mint_address
 
     where o.lifecycle_status in (
         'Active',
