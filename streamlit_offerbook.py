@@ -6,6 +6,8 @@ Run from the solana_analytics project root:
 Environment: DB_TARGET=prod and MOTHERDUCK_TOKEN set securely.
 """
 
+import html
+
 import altair as alt
 import pandas as pd
 import streamlit as st
@@ -18,6 +20,154 @@ st.set_page_config(
     page_title="Jupiter Offerbook | Onchain Analytics",
     page_icon="📊",
     layout="wide",
+)
+
+
+st.markdown(
+    """
+    <style>
+    .block-container {
+        max-width: 1440px;
+        padding-top: 2.2rem;
+        padding-bottom: 3rem;
+    }
+
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin: 0.35rem 0 1rem 0;
+    }
+
+    .kpi-card {
+        min-width: 0;
+        padding: 0.95rem 1rem 0.9rem;
+        border: 1px solid rgba(128, 128, 128, 0.22);
+        border-radius: 0.8rem;
+        background: rgba(128, 128, 128, 0.045);
+    }
+
+    .kpi-label {
+        font-size: 0.86rem;
+        line-height: 1.25;
+        opacity: 0.72;
+        margin-bottom: 0.45rem;
+        min-height: 2.15em;
+    }
+
+    .kpi-value {
+        font-size: 1.72rem;
+        line-height: 1.1;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .dashboard-hero {
+        margin: 0 0 0.2rem 0;
+    }
+
+    .dashboard-hero h1 {
+        margin: 0;
+        font-size: 2.55rem;
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+    }
+
+    .dashboard-hero p {
+        margin: 0.3rem 0 0;
+        font-size: 1.05rem;
+        opacity: 0.7;
+    }
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 1rem !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-bottom: 2rem !important;
+        }
+
+        .dashboard-hero h1 {
+            font-size: 2rem !important;
+            line-height: 1.05 !important;
+            white-space: nowrap;
+        }
+
+        .dashboard-hero p {
+            font-size: 0.95rem;
+            margin-top: 0.2rem;
+        }
+
+        h2 {
+            font-size: 1.48rem !important;
+            line-height: 1.2 !important;
+            margin-top: 1.35rem !important;
+        }
+
+        h3 {
+            font-size: 1.22rem !important;
+            line-height: 1.25 !important;
+        }
+
+        h4 {
+            font-size: 1.08rem !important;
+            line-height: 1.25 !important;
+        }
+
+        .kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .kpi-card {
+            padding: 0.78rem 0.75rem 0.72rem;
+            border-radius: 0.7rem;
+        }
+
+        .kpi-label {
+            font-size: 0.76rem;
+            margin-bottom: 0.35rem;
+            min-height: 2.35em;
+        }
+
+        .kpi-value {
+            font-size: 1.42rem;
+        }
+
+        [data-testid="stVerticalBlock"] {
+            gap: 0.65rem;
+        }
+
+        [data-testid="stVegaLiteChart"] {
+            width: 100% !important;
+        }
+
+        [data-testid="stCaptionContainer"] {
+            font-size: 0.78rem;
+            line-height: 1.35;
+        }
+
+        [data-testid="stDataFrame"] {
+            overflow-x: auto;
+        }
+    }
+
+    @media (max-width: 380px) {
+        .dashboard-hero h1 {
+            font-size: 1.78rem !important;
+        }
+
+        .kpi-value {
+            font-size: 1.28rem;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 WINDOWS = {
@@ -253,6 +403,25 @@ def elapsed_text(seconds) -> str:
     return f"{seconds / 86_400:,.1f} days"
 
 
+def render_kpi_grid(items: list[tuple[str, str]]) -> None:
+    """Render responsive KPI cards: four-up desktop, two-up mobile."""
+    cards = []
+    for label, value in items:
+        safe_label = html.escape(str(label))
+        safe_value = html.escape(str(value))
+        cards.append(
+            "<div class=\"kpi-card\">"
+            f"<div class=\"kpi-label\">{safe_label}</div>"
+            f"<div class=\"kpi-value\">{safe_value}</div>"
+            "</div>"
+        )
+
+    st.markdown(
+        '<div class="kpi-grid">' + "".join(cards) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def sum_count(df: pd.DataFrame, column: str) -> int:
     """Sum additive counts over the selected dates, handling no rows."""
     if df.empty:
@@ -391,7 +560,6 @@ def time_series_chart(
             title=y_title,
             axis=_chart_axis(value_kind, y_title),
         ),
-        color=alt.Color("Series:N", title=None),
         tooltip=[
             alt.Tooltip("block_date:T", title="Date", format="%b %d, %Y"),
             alt.Tooltip("Series:N", title="Series"),
@@ -403,13 +571,27 @@ def time_series_chart(
         ],
     )
 
+    if len(y_columns) > 1:
+        base = base.encode(
+            color=alt.Color(
+                "Series:N",
+                title=None,
+                legend=alt.Legend(
+                    orient="top",
+                    direction="horizontal",
+                    columns=3,
+                    symbolSize=70,
+                ),
+            )
+        )
+
     if mark == "bar":
         chart = base.mark_bar()
     else:
-        chart = base.mark_line(point=alt.OverlayMarkDef(size=40, filled=True))
+        chart = base.mark_line(point=alt.OverlayMarkDef(size=36, filled=True))
 
     st.altair_chart(
-        chart.properties(height=320),
+        chart.properties(height=300),
         use_container_width=True,
     )
 
@@ -536,11 +718,12 @@ def render_overview(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
 
     s = snapshot.iloc[0]
     st.subheader("Lifetime protocol snapshot")
-    a, b, c, d = st.columns(4)
-    a.metric("Originated loans (lifetime)", count_text(s["total_loans"]))
-    b.metric("Active loans (current)", count_text(s["active_loans"]))
-    c.metric("Unique wallets (lifetime)", count_text(s["unique_users"]))
-    d.metric("Priced origination USD (lifetime)", usd_text(s["total_origination_volume_usd"]))
+    render_kpi_grid([
+        ("Originated loans", count_text(s["total_loans"])),
+        ("Active loans", count_text(s["active_loans"])),
+        ("Unique wallets", count_text(s["unique_users"])),
+        ("Priced origination USD", usd_text(s["total_origination_volume_usd"])),
+    ])
 
     price_coverage = s["price_coverage_pct"]
     coverage_label = (
@@ -560,11 +743,12 @@ def render_overview(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
     unpriced = sum_count(daily, "unpriced_originations")
     active_days_avg = pd.to_numeric(daily["unique_active_users"], errors="coerce").mean()
 
-    a, b, c, d = st.columns(4)
-    a.metric("Originated loans", count_text(sum_count(daily, "originated_loans")))
-    b.metric("Priced origination USD", usd_text(sum_usd(daily, "origination_volume_usd")))
-    c.metric("Repaid loans", count_text(sum_count(daily, "repaid_loans")))
-    d.metric("Avg wallets / activity day", count_text(round(active_days_avg)) if pd.notna(active_days_avg) else "N/A")
+    render_kpi_grid([
+        ("Originated loans", count_text(sum_count(daily, "originated_loans"))),
+        ("Priced origination USD", usd_text(sum_usd(daily, "origination_volume_usd"))),
+        ("Repaid loans", count_text(sum_count(daily, "repaid_loans"))),
+        ("Avg wallets / day", count_text(round(active_days_avg)) if pd.notna(active_days_avg) else "N/A"),
+    ])
 
     st.caption(f"Origination price coverage in this period: {coverage_text(priced, unpriced)}. Average daily wallets does not represent period-unique wallets.")
     left, right = st.columns(2)
@@ -588,11 +772,12 @@ def render_overview(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
         chart_volume(daily, "origination_volume_usd", "Priced origination USD")
 
     st.markdown("#### Current loan position")
-    a, b, c, d = st.columns(4)
-    a.metric("Repaid loans", count_text(s["repaid_loans"]))
-    b.metric("Defaulted loans", count_text(s["defaulted_loans"]))
-    c.metric("Past-due open loans", count_text(s["past_due_open_loans"]))
-    d.metric("Open principal at origination prices", usd_text(s["open_principal_at_origination_usd"]))
+    render_kpi_grid([
+        ("Repaid loans", count_text(s["repaid_loans"])),
+        ("Defaulted loans", count_text(s["defaulted_loans"])),
+        ("Past-due open", count_text(s["past_due_open_loans"])),
+        ("Open principal", usd_text(s["open_principal_at_origination_usd"])),
+    ])
     st.caption("Open principal is valued at loan origination prices. It is not current marked-to-market TVL.")
 
 
@@ -607,11 +792,12 @@ def render_lending(daily: pd.DataFrame, window: str):
     unpriced = sum_count(daily, "unpriced_loan_count")
     avg_wallets = pd.to_numeric(daily["unique_users"], errors="coerce").mean()
 
-    a, b, c, d = st.columns(4)
-    a.metric("Funded loans", count_text(sum_count(daily, "loan_count")))
-    b.metric("Priced origination USD", usd_text(sum_usd(daily, "origination_volume_usd")))
-    c.metric("Sum of daily filled offers", count_text(sum_count(daily, "filled_offer_count")))
-    d.metric("Avg wallets / lending day", count_text(round(avg_wallets)) if pd.notna(avg_wallets) else "N/A")
+    render_kpi_grid([
+        ("Funded loans", count_text(sum_count(daily, "loan_count"))),
+        ("Priced origination USD", usd_text(sum_usd(daily, "origination_volume_usd"))),
+        ("Daily filled offers", count_text(sum_count(daily, "filled_offer_count"))),
+        ("Avg wallets / day", count_text(round(avg_wallets)) if pd.notna(avg_wallets) else "N/A"),
+    ])
 
     st.caption(f"Loan-level price coverage: {coverage_text(priced, unpriced)}. Daily distinct-wallet counts are not additive across dates.")
     left, right = st.columns(2)
@@ -648,11 +834,12 @@ def render_lifecycle(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
     st.subheader("Current lifecycle state · lifetime snapshot")
     if not snapshot.empty:
         s = snapshot.iloc[0]
-        a, b, c, d = st.columns(4)
-        a.metric("Active", count_text(s["active_loans"]))
-        b.metric("Repaid", count_text(s["repaid_loans"]))
-        c.metric("Defaulted", count_text(s["defaulted_loans"]))
-        d.metric("Extended at least once", count_text(s["extended_loans"]))
+        render_kpi_grid([
+            ("Active", count_text(s["active_loans"])),
+            ("Repaid", count_text(s["repaid_loans"])),
+            ("Defaulted", count_text(s["defaulted_loans"])),
+            ("Extended", count_text(s["extended_loans"])),
+        ])
 
         breakdown = pd.DataFrame({
             "Loan status": ["Active", "Repaid", "Defaulted"],
@@ -672,11 +859,12 @@ def render_lifecycle(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
         st.info("No lifecycle activity was found in this period.")
         return
 
-    a, b, c, d = st.columns(4)
-    a.metric("Originations", count_text(sum_count(daily, "originated_loans")))
-    b.metric("Repayments", count_text(sum_count(daily, "repaid_loans")))
-    c.metric("Defaults", count_text(sum_count(daily, "defaulted_loans")))
-    d.metric("Realized interest (priced USD)", usd_text(sum_usd(daily, "realized_interest_usd")))
+    render_kpi_grid([
+        ("Originations", count_text(sum_count(daily, "originated_loans"))),
+        ("Repayments", count_text(sum_count(daily, "repaid_loans"))),
+        ("Defaults", count_text(sum_count(daily, "defaulted_loans"))),
+        ("Realized interest", usd_text(sum_usd(daily, "realized_interest_usd"))),
+    ])
 
     activity = date_ready(daily).rename(columns={
         "originated_loans": "Originations",
@@ -717,11 +905,12 @@ def render_markets(markets: pd.DataFrame, window: str):
         axis=1,
     )
 
-    a, b, c, d = st.columns(4)
-    a.metric("Active market pairs in period", count_text(len(markets)))
-    b.metric("Originated loans", count_text(sum_count(markets, "originated_loans")))
-    c.metric("Priced origination USD", usd_text(sum_usd(markets, "origination_volume_usd")))
-    d.metric("Origination price coverage", coverage_text(int(priced.sum()), int(unpriced.sum())))
+    render_kpi_grid([
+        ("Active market pairs", count_text(len(markets))),
+        ("Originated loans", count_text(sum_count(markets, "originated_loans"))),
+        ("Priced origination USD", usd_text(sum_usd(markets, "origination_volume_usd"))),
+        ("Price coverage", coverage_text(int(priced.sum()), int(unpriced.sum()))),
+    ])
 
     left, right = st.columns(2)
     with left:
@@ -852,16 +1041,15 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
         else:
             avg_apy_raw = float("nan")
 
-        a, b, c, d = st.columns(4)
-        a.metric("Offers created", count_text(offers))
-        b.metric("Reached a fill", percent_text(fill_rate))
-        c.metric("Fully fulfilled", percent_text(full_fill_rate))
-        d.metric("Avg time to first fill", elapsed_text(avg_fill_seconds))
-
-        e, f, g = st.columns(3)
-        e.metric("Average offered APY", apy_text(avg_apy_raw))
-        f.metric("Cancelled", percent_text(cancel_rate))
-        g.metric("Expired", percent_text(expiry_rate))
+        render_kpi_grid([
+            ("Offers created", count_text(offers)),
+            ("Reached a fill", percent_text(fill_rate)),
+            ("Fully fulfilled", percent_text(full_fill_rate)),
+            ("Avg time to first fill", elapsed_text(avg_fill_seconds)),
+            ("Average offered APY", apy_text(avg_apy_raw)),
+            ("Cancelled", percent_text(cancel_rate)),
+            ("Expired", percent_text(expiry_rate)),
+        ])
 
         daily = (
             eff.groupby("block_date", as_index=False)[
@@ -989,11 +1177,12 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
         else:
             typical_age = float("nan")
 
-        a, b, c, d = st.columns(4)
-        a.metric("Open offers", count_text(open_offers))
-        b.metric("Stale >7d", percent_text(stale7_pct))
-        c.metric("Stale >30d", percent_text(stale30_pct))
-        d.metric("Typical open-offer age", elapsed_text(typical_age))
+        render_kpi_grid([
+            ("Open offers", count_text(open_offers)),
+            ("Stale >7d", percent_text(stale7_pct)),
+            ("Stale >30d", percent_text(stale30_pct)),
+            ("Typical offer age", elapsed_text(typical_age)),
+        ])
 
         market_liq = (
             liq.groupby(
@@ -1091,10 +1280,11 @@ def render_activity(activity: pd.DataFrame, window: str):
         activity[activity["instruction_name"].eq("unknown")],
         "instruction_count",
     )
-    a, b, c = st.columns(3)
-    a.metric("Instructions", count_text(total))
-    b.metric("Instruction categories", count_text(activity["instruction_name"].nunique()))
-    c.metric("Unclassified instructions", count_text(unknown))
+    render_kpi_grid([
+        ("Instructions", count_text(total)),
+        ("Instruction categories", count_text(activity["instruction_name"].nunique())),
+        ("Unclassified", count_text(unknown)),
+    ])
 
     daily = activity.groupby("block_date", as_index=False)["instruction_count"].sum()
     st.markdown("#### Instructions per day")
@@ -1136,8 +1326,16 @@ def render_activity(activity: pd.DataFrame, window: str):
 # ----------------------------------------------------------
 def main():
     """Render sidebar, fetch only the selected page's data, and show charts."""
-    st.title("Jupiter Offerbook | Onchain Analytics")
-    st.caption("MotherDuck + dbt marts · UTC calendar-day filters · read-only dashboard")
+    st.markdown(
+        """
+        <div class="dashboard-hero">
+            <h1>Jupiter Offerbook</h1>
+            <p>Onchain Analytics</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("MotherDuck + dbt marts · UTC data · read-only dashboard")
 
     st.sidebar.header("Explore Offerbook")
     page = st.sidebar.radio(
