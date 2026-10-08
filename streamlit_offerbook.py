@@ -399,6 +399,66 @@ def load_activity(days: int | None) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def load_daily_execution(days: int | None) -> pd.DataFrame:
+    """Daily protocol execution health from raw Solana transactions."""
+    clause, parameters = date_filter(days)
+    return read_motherduck(f"""
+        select
+            block_date,
+            transactions,
+            successful_transactions,
+            failed_transactions,
+            success_rate_pct,
+            total_compute_units,
+            successful_compute_units,
+            avg_compute_units,
+            median_compute_units,
+            p90_compute_units,
+            transactions_with_compute_units,
+            total_fee_lamports,
+            total_fee_sol,
+            avg_fee_lamports,
+            median_fee_lamports,
+            avg_top_level_instructions,
+            avg_inner_instructions,
+            avg_accounts,
+            avg_log_messages,
+            p90_inner_instructions,
+            p90_accounts,
+            compute_units_per_successful_tx
+        from main.mart_offerbook_daily_execution
+        {clause}
+        order by block_date
+    """, parameters)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_instruction_execution(days: int | None) -> pd.DataFrame:
+    """Transaction-associated execution metrics by top-level instruction type."""
+    clause, parameters = date_filter(days)
+    return read_motherduck(f"""
+        select
+            block_date,
+            instruction_name,
+            instruction_count,
+            transaction_count,
+            successful_transactions,
+            failed_transactions,
+            success_rate_pct,
+            associated_compute_units,
+            avg_associated_compute_units,
+            median_associated_compute_units,
+            p90_associated_compute_units,
+            associated_fee_lamports,
+            associated_fee_sol,
+            median_associated_fee_lamports
+        from main.mart_offerbook_instruction_execution_daily
+        {clause}
+        order by block_date, transaction_count desc
+    """, parameters)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
 def load_offer_efficiency(days: int | None) -> pd.DataFrame:
     """Offer-creation cohorts by market and creator role."""
     clause, parameters = date_filter(days)
@@ -479,6 +539,20 @@ def usd_text(value) -> str:
         return f"${value / 1_000:,.1f}K"
     return f"${value:,.2f}"
 
+
+
+def sol_text(value) -> str:
+    """Format SOL amounts without hiding small protocol fees."""
+    if pd.isna(value):
+        return "N/A"
+
+    value = float(value)
+
+    if abs(value) >= 1:
+        return f"{value:,.3f} SOL"
+    if abs(value) >= 0.001:
+        return f"{value:,.5f} SOL"
+    return f"{value:,.7f} SOL"
 
 
 def elapsed_text(seconds) -> str:
@@ -1966,57 +2040,423 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
     )
 
 
-def render_activity(activity: pd.DataFrame, window: str):
-    """Summarize program-instruction activity without double-counting transactions."""
-    st.subheader(f"Protocol instruction activity · {window}")
-    if activity.empty:
-        st.info("No instruction activity was found in this period.")
-        return
-
-    total = sum_count(activity, "instruction_count")
-    unknown = sum_count(
-        activity[activity["instruction_name"].eq("unknown")],
-        "instruction_count",
-    )
-    render_kpi_grid([
-        ("Instructions", count_text(total)),
-        ("Instruction categories", count_text(activity["instruction_name"].nunique())),
-        ("Unclassified", count_text(unknown)),
-    ])
-
-    daily = activity.groupby("block_date", as_index=False)["instruction_count"].sum()
-    st.markdown("#### Instructions per day")
-    time_series_chart(
-        daily.rename(columns={"instruction_count": "Instructions"}),
-        ["Instructions"],
-        value_kind="count",
-        y_title="Instructions",
-    )
-
-    rankings = (
-        activity.groupby("instruction_name", as_index=False)["instruction_count"]
-        .sum()
-        .sort_values("instruction_count", ascending=False)
-    )
-    left, right = st.columns(2)
-    with left:
-        st.markdown("#### Top instruction types")
-        labeled_bar_chart(
-            rankings.head(12),
-            "instruction_name",
-            "instruction_count",
-            value_kind="count",
-            axis_title="Instructions",
-        )
-    with right:
-        st.markdown("#### Full instruction breakdown")
-        st.dataframe(rankings, hide_index=True, use_container_width=True)
-
+def render_activity(
+    activity: pd.DataFrame,
+    execution: pd.DataFrame,
+    instruction_execution: pd.DataFrame,
+    window: str,
+):
+    """Show protocol usage together with Solana execution health."""
+    st.subheader(f"Protocol Activity · {window}")
     st.caption(
-        "Do not sum per-instruction-type transaction_count to estimate unique "
-        "protocol transactions: the same signature can contain multiple types. "
-        "This page counts instructions instead."
+        "Protocol-wide execution metrics come from the raw Solana transaction payload. "
+        "Instruction-type CU and fee metrics are transaction-associated rather than "
+        "exclusively attributable to one instruction."
     )
+
+    st.markdown("### Execution health")
+
+    if execution.empty:
+        st.info("No transaction execution data was found in this period.")
+    else:
+        execution = execution.copy()
+
+        execution_numeric = [
+            "transactions",
+            "successful_transactions",
+            "failed_transactions",
+            "total_compute_units",
+            "successful_compute_units",
+            "total_fee_lamports",
+            "total_fee_sol",
+            "avg_top_level_instructions",
+            "avg_inner_instructions",
+            "avg_accounts",
+            "avg_log_messages",
+            "median_compute_units",
+            "p90_compute_units",
+            "compute_units_per_successful_tx",
+        ]
+        for column in execution_numeric:
+            execution[column] = pd.to_numeric(
+                execution[column],
+                errors="coerce",
+            )
+
+        total_transactions = sum_count(execution, "transactions")
+        successful_transactions = sum_count(
+            execution,
+            "successful_transactions",
+        )
+        failed_transactions = sum_count(
+            execution,
+            "failed_transactions",
+        )
+        total_compute_units = sum_count(
+            execution,
+            "total_compute_units",
+        )
+        successful_compute_units = sum_count(
+            execution,
+            "successful_compute_units",
+        )
+        total_fee_sol = pd.to_numeric(
+            execution["total_fee_sol"],
+            errors="coerce",
+        ).sum(min_count=1)
+
+        success_rate = (
+            100 * successful_transactions / total_transactions
+            if total_transactions
+            else float("nan")
+        )
+        avg_cu_per_tx = (
+            total_compute_units / total_transactions
+            if total_transactions
+            else float("nan")
+        )
+        cu_per_success = (
+            successful_compute_units / successful_transactions
+            if successful_transactions
+            else float("nan")
+        )
+
+        render_kpi_grid([
+            ("Transactions", count_text(total_transactions)),
+            ("Success rate", percent_text(success_rate)),
+            ("Total compute units", compact_number_text(total_compute_units)),
+            ("Transaction fees", sol_text(total_fee_sol)),
+            ("Failed transactions", count_text(failed_transactions)),
+            ("Avg CU / tx", compact_number_text(avg_cu_per_tx)),
+            ("CU / successful tx", compact_number_text(cu_per_success)),
+        ])
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Compute consumption")
+            compute_chart = execution.rename(columns={
+                "total_compute_units": "Total CU",
+            })
+            time_series_chart(
+                compute_chart,
+                ["Total CU"],
+                value_kind="count",
+                y_title="Compute units",
+            )
+
+        with right:
+            st.markdown("#### Transaction success rate")
+            success_chart = execution.rename(columns={
+                "success_rate_pct": "Success rate",
+            })
+            time_series_chart(
+                success_chart,
+                ["Success rate"],
+                value_kind="percent",
+                y_title="Success rate",
+            )
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Compute-unit distribution")
+            cu_distribution = execution.rename(columns={
+                "median_compute_units": "Median CU",
+                "p90_compute_units": "P90 CU",
+            })
+            time_series_chart(
+                cu_distribution,
+                ["Median CU", "P90 CU"],
+                value_kind="count",
+                y_title="Compute units",
+            )
+
+        with right:
+            st.markdown("#### Transaction fees")
+            fee_chart = execution.rename(columns={
+                "total_fee_lamports": "Fees (lamports)",
+            })
+            time_series_chart(
+                fee_chart,
+                ["Fees (lamports)"],
+                value_kind="count",
+                y_title="Lamports",
+            )
+
+        st.markdown("#### Transaction complexity")
+
+        complexity = execution.copy()
+        transaction_weights = pd.to_numeric(
+            complexity["transactions"],
+            errors="coerce",
+        ).fillna(0)
+
+        def weighted_daily_average(column: str):
+            values = pd.to_numeric(
+                complexity[column],
+                errors="coerce",
+            )
+            valid = values.notna() & transaction_weights.gt(0)
+
+            if not valid.any():
+                return float("nan")
+
+            return (
+                values[valid] * transaction_weights[valid]
+            ).sum() / transaction_weights[valid].sum()
+
+        render_kpi_grid([
+            (
+                "Avg top-level instructions",
+                compact_number_text(
+                    weighted_daily_average("avg_top_level_instructions"),
+                    decimals=1,
+                ),
+            ),
+            (
+                "Avg inner instructions",
+                compact_number_text(
+                    weighted_daily_average("avg_inner_instructions"),
+                    decimals=1,
+                ),
+            ),
+            (
+                "Avg account footprint",
+                compact_number_text(
+                    weighted_daily_average("avg_accounts"),
+                    decimals=1,
+                ),
+            ),
+            (
+                "Avg log messages",
+                compact_number_text(
+                    weighted_daily_average("avg_log_messages"),
+                    decimals=1,
+                ),
+            ),
+        ])
+
+        complexity_chart = execution.rename(columns={
+            "avg_top_level_instructions": "Top-level instructions",
+            "avg_inner_instructions": "Inner instructions",
+            "avg_accounts": "Accounts",
+        })
+        time_series_chart(
+            complexity_chart,
+            ["Top-level instructions", "Inner instructions", "Accounts"],
+            value_kind="raw",
+            y_title="Average per transaction",
+        )
+
+    st.markdown("### Instruction activity")
+
+    if activity.empty:
+        st.info("No decoded instruction activity was found in this period.")
+    else:
+        total = sum_count(activity, "instruction_count")
+        unknown = sum_count(
+            activity[activity["instruction_name"].eq("unknown")],
+            "instruction_count",
+        )
+
+        render_kpi_grid([
+            ("Instructions", count_text(total)),
+            (
+                "Instruction categories",
+                count_text(activity["instruction_name"].nunique()),
+            ),
+            ("Unclassified", count_text(unknown)),
+        ])
+
+        daily = (
+            activity.groupby("block_date", as_index=False)["instruction_count"]
+            .sum()
+        )
+        st.markdown("#### Instructions per day")
+        time_series_chart(
+            daily.rename(columns={"instruction_count": "Instructions"}),
+            ["Instructions"],
+            value_kind="count",
+            y_title="Instructions",
+        )
+
+        rankings = (
+            activity.groupby(
+                "instruction_name",
+                as_index=False,
+            )["instruction_count"]
+            .sum()
+            .sort_values(
+                "instruction_count",
+                ascending=False,
+            )
+        )
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Top instruction types")
+            labeled_bar_chart(
+                rankings.head(12),
+                "instruction_name",
+                "instruction_count",
+                value_kind="count",
+                axis_title="Instructions",
+            )
+
+        with right:
+            st.markdown("#### Full instruction breakdown")
+            st.dataframe(
+                rankings,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    st.markdown("### Instruction reliability & resource intensity")
+
+    if instruction_execution.empty:
+        st.info("No instruction execution data was found in this period.")
+    else:
+        ix = instruction_execution.copy()
+
+        for column in [
+            "instruction_count",
+            "transaction_count",
+            "successful_transactions",
+            "failed_transactions",
+            "associated_compute_units",
+            "associated_fee_lamports",
+        ]:
+            ix[column] = pd.to_numeric(
+                ix[column],
+                errors="coerce",
+            )
+
+        by_instruction = (
+            ix.groupby("instruction_name", as_index=False)
+            .agg(
+                instruction_count=("instruction_count", "sum"),
+                transaction_count=("transaction_count", "sum"),
+                successful_transactions=("successful_transactions", "sum"),
+                failed_transactions=("failed_transactions", "sum"),
+                associated_compute_units=("associated_compute_units", "sum"),
+                associated_fee_lamports=("associated_fee_lamports", "sum"),
+            )
+        )
+
+        by_instruction["failure_rate_pct"] = (
+            100
+            * by_instruction["failed_transactions"]
+            / by_instruction["transaction_count"].where(
+                by_instruction["transaction_count"].ne(0)
+            )
+        )
+
+        by_instruction["avg_associated_cu_per_tx"] = (
+            by_instruction["associated_compute_units"]
+            / by_instruction["transaction_count"].where(
+                by_instruction["transaction_count"].ne(0)
+            )
+        )
+
+        by_instruction["avg_associated_fee_lamports"] = (
+            by_instruction["associated_fee_lamports"]
+            / by_instruction["transaction_count"].where(
+                by_instruction["transaction_count"].ne(0)
+            )
+        )
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("#### Most compute-intensive instruction types")
+            compute_rank = (
+                by_instruction.dropna(
+                    subset=["avg_associated_cu_per_tx"]
+                )
+                .sort_values(
+                    "avg_associated_cu_per_tx",
+                    ascending=False,
+                )
+                .head(12)
+            )
+            labeled_bar_chart(
+                compute_rank,
+                "instruction_name",
+                "avg_associated_cu_per_tx",
+                value_kind="count",
+                axis_title="Associated CU / tx",
+            )
+
+        with right:
+            st.markdown("#### Highest failure rates")
+            failure_rank = (
+                by_instruction[
+                    by_instruction["transaction_count"].ge(3)
+                ]
+                .sort_values(
+                    ["failure_rate_pct", "transaction_count"],
+                    ascending=[False, False],
+                )
+                .head(12)
+            )
+
+            if failure_rank.empty:
+                st.info(
+                    "No instruction types with at least 3 transactions are available."
+                )
+            else:
+                labeled_bar_chart(
+                    failure_rank,
+                    "instruction_name",
+                    "failure_rate_pct",
+                    value_kind="percent",
+                    axis_title="Failure rate",
+                )
+
+        execution_table = by_instruction.sort_values(
+            "transaction_count",
+            ascending=False,
+        ).rename(columns={
+            "instruction_name": "Instruction",
+            "instruction_count": "Instructions",
+            "transaction_count": "Transactions",
+            "failed_transactions": "Failed tx",
+            "failure_rate_pct": "Failure rate (%)",
+            "avg_associated_cu_per_tx": "Associated CU / tx",
+            "avg_associated_fee_lamports": "Associated fee / tx (lamports)",
+        })
+
+        st.markdown("#### Instruction execution table")
+        st.dataframe(
+            execution_table[[
+                "Instruction",
+                "Instructions",
+                "Transactions",
+                "Failed tx",
+                "Failure rate (%)",
+                "Associated CU / tx",
+                "Associated fee / tx (lamports)",
+            ]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Instructions": st.column_config.NumberColumn(format="%d"),
+                "Transactions": st.column_config.NumberColumn(format="%d"),
+                "Failed tx": st.column_config.NumberColumn(format="%d"),
+                "Failure rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                "Associated CU / tx": st.column_config.NumberColumn(format="%.0f"),
+                "Associated fee / tx (lamports)": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+
+        st.caption(
+            "Compute units and fees in the instruction section belong to the full "
+            "transaction containing that instruction type. A transaction containing "
+            "multiple Offerbook instruction types contributes to each relevant type, "
+            "so these values must not be summed across instruction types."
+        )
 
 
 # ----------------------------------------------------------
@@ -2048,7 +2488,7 @@ def main():
             load_snapshot, load_daily_lifecycle, load_daily_lending,
             load_wallet_retention, load_lender_performance, load_borrower_performance,
             load_markets, load_offer_efficiency, load_market_liquidity_snapshot,
-            load_activity,
+            load_activity, load_daily_execution, load_instruction_execution,
         ):
             loader.clear()
 
@@ -2078,7 +2518,12 @@ def main():
                     label,
                 )
             else:
-                render_activity(load_activity(days), label)
+                render_activity(
+                    load_activity(days),
+                    load_daily_execution(days),
+                    load_instruction_execution(days),
+                    label,
+                )
     except Exception as exc:
         st.error("Unable to load this page. Check your MotherDuck connection and that the dbt marts exist.")
         st.caption(f"Error type: {type(exc).__name__}")
