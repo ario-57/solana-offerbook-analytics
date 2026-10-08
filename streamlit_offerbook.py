@@ -462,7 +462,7 @@ def apy_text(raw_apy) -> str:
 
 
 def short_asset_label(symbol, asset_key) -> str:
-    """Prefer token symbols; shorten raw asset keys only as a last resort."""
+    """Prefer token symbols; make typed non-token asset keys readable."""
     if pd.notna(symbol) and str(symbol).strip():
         return str(symbol).strip()
 
@@ -470,6 +470,24 @@ def short_asset_label(symbol, asset_key) -> str:
         return "Unknown"
 
     key = str(asset_key)
+    asset_type, separator, address = key.partition(":")
+
+    if separator:
+        if asset_type.lower() == "corenft":
+            short_address = (
+                address
+                if len(address) <= 10
+                else f"{address[:4]}…{address[-4:]}"
+            )
+            return f"Core NFT {short_address}"
+
+        if asset_type.lower() == "token":
+            return (
+                address
+                if len(address) <= 10
+                else f"{address[:4]}…{address[-4:]}"
+            )
+
     if len(key) <= 14:
         return key
     return f"{key[:5]}…{key[-4:]}"
