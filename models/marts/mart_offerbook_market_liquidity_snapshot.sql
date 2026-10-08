@@ -4,10 +4,28 @@
 
 with offers as (
 
-    select *
-    from {{ ref('int_offerbook_offer_lifecycle') }}
+    select
+        o.*,
 
-    where lifecycle_status in (
+        coalesce(
+            o.principal_symbol,
+            p.symbol
+        ) as resolved_principal_symbol,
+
+        coalesce(
+            o.collateral_symbol,
+            c.symbol
+        ) as resolved_collateral_symbol
+
+    from {{ ref('int_offerbook_offer_lifecycle') }} as o
+
+    left join {{ ref('int_tokens') }} as p
+        on o.principal_asset_key = p.mint_address
+
+    left join {{ ref('int_tokens') }} as c
+        on o.collateral_asset_key = c.mint_address
+
+    where o.lifecycle_status in (
         'Active',
         'PartiallyFilled'
     )
@@ -23,10 +41,10 @@ market as (
         collateral_asset_key,
         creator_role,
 
-        any_value(principal_symbol)
+        any_value(resolved_principal_symbol)
             as principal_symbol,
 
-        any_value(collateral_symbol)
+        any_value(resolved_collateral_symbol)
             as collateral_symbol,
 
         count(*)

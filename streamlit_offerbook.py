@@ -351,6 +351,8 @@ def load_market_liquidity_snapshot() -> pd.DataFrame:
             principal_asset_key,
             collateral_asset_key,
             creator_role,
+            principal_symbol,
+            collateral_symbol,
             market_name,
             open_offers,
             active_offer_creators,
@@ -457,6 +459,33 @@ def percent_text(value, decimals: int = 1) -> str:
 def apy_text(raw_apy) -> str:
     """Offerbook APY is stored in basis-point-like raw units: raw / 100 = %."""
     return "N/A" if pd.isna(raw_apy) else f"{float(raw_apy) / 100:,.2f}%"
+
+
+def short_asset_label(symbol, asset_key) -> str:
+    """Prefer token symbols; shorten raw asset keys only as a last resort."""
+    if pd.notna(symbol) and str(symbol).strip():
+        return str(symbol).strip()
+
+    if pd.isna(asset_key):
+        return "Unknown"
+
+    key = str(asset_key)
+    if len(key) <= 14:
+        return key
+    return f"{key[:5]}…{key[-4:]}"
+
+
+def market_display_label(row) -> str:
+    """Build a readable market label for charts and tables."""
+    principal = short_asset_label(
+        row.get("principal_symbol"),
+        row.get("principal_asset_key"),
+    )
+    collateral = short_asset_label(
+        row.get("collateral_symbol"),
+        row.get("collateral_asset_key"),
+    )
+    return f"{principal} / {collateral}"
 
 
 def compact_number_text(value, decimals: int = 1) -> str:
@@ -1280,9 +1309,14 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
             ("Typical offer age", elapsed_text(typical_age)),
         ])
 
+        liq["market_label"] = liq.apply(
+            market_display_label,
+            axis=1,
+        )
+
         market_liq = (
             liq.groupby(
-                ["principal_asset_key", "collateral_asset_key", "market_name"],
+                ["principal_asset_key", "collateral_asset_key", "market_label"],
                 as_index=False,
             )
             .agg(
@@ -1305,7 +1339,7 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
             st.markdown("#### Markets with the most open offers")
             labeled_bar_chart(
                 market_liq.sort_values("open_offers", ascending=False).head(12),
-                "market_name",
+                "market_label",
                 "open_offers",
                 value_kind="count",
                 axis_title="Open offers",
@@ -1322,7 +1356,7 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
             else:
                 labeled_bar_chart(
                     attention,
-                    "market_name",
+                    "market_label",
                     "stale_7d_pct",
                     value_kind="percent",
                     axis_title="Stale >7d",
@@ -1334,7 +1368,7 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
             ascending=[False, False],
         )
         attention_table = attention.rename(columns={
-            "market_name": "Market",
+            "market_label": "Market",
             "open_offers": "Open offers",
             "stale_7d_offers": "Stale >7d",
             "stale_30d_offers": "Stale >30d",
