@@ -6,6 +6,7 @@ Run from the solana_analytics project root:
 Environment: DB_TARGET=prod and MOTHERDUCK_TOKEN set securely.
 """
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -279,13 +280,249 @@ def date_ready(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def percent_text(value, decimals: int = 1) -> str:
+    """Format percentage-point values consistently."""
+    return "N/A" if pd.isna(value) else f"{float(value):,.{decimals}f}%"
+
+
+def apy_text(raw_apy) -> str:
+    """Offerbook APY is stored in basis-point-like raw units: raw / 100 = %."""
+    return "N/A" if pd.isna(raw_apy) else f"{float(raw_apy) / 100:,.2f}%"
+
+
+def compact_number_text(value, decimals: int = 1) -> str:
+    """Compact generic numbers for chart labels."""
+    if pd.isna(value):
+        return "N/A"
+    value = float(value)
+    absolute = abs(value)
+    if absolute >= 1_000_000_000:
+        return f"{value / 1_000_000_000:,.{decimals}f}B"
+    if absolute >= 1_000_000:
+        return f"{value / 1_000_000:,.{decimals}f}M"
+    if absolute >= 1_000:
+        return f"{value / 1_000:,.{decimals}f}K"
+    if value.is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.{decimals}f}"
+
+
+def _chart_axis(value_kind: str, title: str | None = None):
+    """Create consistent compact axes for counts, USD, percentages, and raw values."""
+    if value_kind == "usd":
+        return alt.Axis(
+            title=title,
+            labelExpr="'$' + format(datum.value, '~s')",
+            gridOpacity=0.18,
+        )
+    if value_kind == "percent":
+        return alt.Axis(
+            title=title,
+            labelExpr="format(datum.value, '.1f') + '%'",
+            gridOpacity=0.18,
+        )
+    if value_kind == "count":
+        return alt.Axis(
+            title=title,
+            format="~s",
+            tickMinStep=1,
+            gridOpacity=0.18,
+        )
+    return alt.Axis(title=title, gridOpacity=0.18)
+
+
+def _tooltip_format(value_kind: str) -> str:
+    """Return Vega-Lite numeric tooltip format strings."""
+    if value_kind == "usd":
+        return "$,.2f"
+    if value_kind == "percent":
+        return ",.1f"
+    if value_kind == "count":
+        return ",.0f"
+    return ",.2f"
+
+
+def _display_value(value, value_kind: str) -> str:
+    """Return a compact label for values printed directly on bar charts."""
+    if value_kind == "usd":
+        return usd_text(value)
+    if value_kind == "percent":
+        return percent_text(value)
+    if value_kind == "count":
+        return count_text(value)
+    return compact_number_text(value)
+
+
+def time_series_chart(
+    df: pd.DataFrame,
+    y_columns: list[str],
+    *,
+    value_kind: str = "count",
+    y_title: str | None = None,
+    mark: str = "line",
+):
+    """Render a clean time series with compact axes and exact hover values."""
+    if df.empty:
+        return
+
+    data = date_ready(df)
+    for column in y_columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+
+    long = data.melt(
+        id_vars=["block_date"],
+        value_vars=y_columns,
+        var_name="Series",
+        value_name="Value",
+    ).dropna(subset=["Value"])
+
+    if long.empty:
+        st.info("No values are available for this chart.")
+        return
+
+    base = alt.Chart(long).encode(
+        x=alt.X(
+            "block_date:T",
+            title=None,
+            axis=alt.Axis(format="%b %d", labelAngle=0),
+        ),
+        y=alt.Y(
+            "Value:Q",
+            title=y_title,
+            axis=_chart_axis(value_kind, y_title),
+        ),
+        color=alt.Color("Series:N", title=None),
+        tooltip=[
+            alt.Tooltip("block_date:T", title="Date", format="%b %d, %Y"),
+            alt.Tooltip("Series:N", title="Series"),
+            alt.Tooltip(
+                "Value:Q",
+                title=y_title or "Value",
+                format=_tooltip_format(value_kind),
+            ),
+        ],
+    )
+
+    if mark == "bar":
+        chart = base.mark_bar()
+    else:
+        chart = base.mark_line(point=alt.OverlayMarkDef(size=40, filled=True))
+
+    st.altair_chart(
+        chart.properties(height=320),
+        use_container_width=True,
+    )
+
+
+def labeled_bar_chart(
+    df: pd.DataFrame,
+    category: str,
+    value: str,
+    *,
+    value_kind: str = "count",
+    axis_title: str | None = None,
+    horizontal: bool = True,
+):
+    """Render bars with compact direct labels and exact hover values."""
+    if df.empty:
+        st.info("No values are available for this chart.")
+        return
+
+    data = df.copy()
+    data[value] = pd.to_numeric(data[value], errors="coerce")
+    data = data.dropna(subset=[category, value])
+
+    if data.empty:
+        st.info("No values are available for this chart.")
+        return
+
+    data["display_value"] = data[value].map(
+        lambda x: _display_value(x, value_kind)
+    )
+
+    tooltip = [
+        alt.Tooltip(f"{category}:N", title="Category"),
+        alt.Tooltip(
+            f"{value}:Q",
+            title=axis_title or value,
+            format=_tooltip_format(value_kind),
+        ),
+    ]
+
+    if horizontal:
+        bars = alt.Chart(data).mark_bar().encode(
+            y=alt.Y(
+                f"{category}:N",
+                sort="-x",
+                title=None,
+                axis=alt.Axis(labelLimit=220),
+            ),
+            x=alt.X(
+                f"{value}:Q",
+                title=axis_title,
+                axis=_chart_axis(value_kind, axis_title),
+            ),
+            tooltip=tooltip,
+        )
+
+        labels = bars.mark_text(
+            align="left",
+            baseline="middle",
+            dx=4,
+            fontSize=12,
+        ).encode(
+            text=alt.Text("display_value:N")
+        )
+
+    else:
+        bars = alt.Chart(data).mark_bar().encode(
+            x=alt.X(
+                f"{category}:N",
+                sort="-y",
+                title=None,
+                axis=alt.Axis(labelAngle=0),
+            ),
+            y=alt.Y(
+                f"{value}:Q",
+                title=axis_title,
+                axis=_chart_axis(value_kind, axis_title),
+            ),
+            tooltip=tooltip,
+        )
+
+        labels = bars.mark_text(
+            align="center",
+            baseline="bottom",
+            dy=-4,
+            fontSize=12,
+        ).encode(
+            text=alt.Text("display_value:N")
+        )
+
+    st.altair_chart(
+        (bars + labels).properties(height=320),
+        use_container_width=True,
+    )
+
+
 def chart_volume(daily: pd.DataFrame, amount_column: str, title: str):
-    """Preserve unknown USD values; use zero only when there were no loans."""
+    """Daily USD chart with compact axis and exact-value hover tooltips."""
     volume = date_ready(daily)
     volume[title] = pd.to_numeric(volume[amount_column], errors="coerce")
-    if "originated_loans" in volume.columns and amount_column == "origination_volume_usd":
+
+    if (
+        "originated_loans" in volume.columns
+        and amount_column == "origination_volume_usd"
+    ):
         volume.loc[volume["originated_loans"].eq(0), title] = 0
-    st.bar_chart(volume, x="block_date", y=title)
+
+    time_series_chart(
+        volume,
+        [title],
+        value_kind="usd",
+        y_title="USD",
+        mark="bar",
+    )
 
 
 # ----------------------------------------------------------
@@ -307,7 +544,7 @@ def render_overview(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
 
     price_coverage = s["price_coverage_pct"]
     coverage_label = (
-        f"{float(price_coverage):.1f}%" if pd.notna(price_coverage) else "N/A"
+        percent_text(price_coverage) if pd.notna(price_coverage) else "N/A"
     )
     st.caption(
         "USD origination totals exclude loans without historical prices. "
@@ -339,7 +576,12 @@ def render_overview(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
             "repaid_loans": "Repaid",
             "defaulted_loans": "Defaulted",
         })
-        st.line_chart(chart, x="block_date", y=["Originated", "Repaid", "Defaulted"])
+        time_series_chart(
+            chart,
+            ["Originated", "Repaid", "Defaulted"],
+            value_kind="count",
+            y_title="Loans",
+        )
 
     with right:
         st.markdown("#### Daily priced origination (USD)")
@@ -375,7 +617,12 @@ def render_lending(daily: pd.DataFrame, window: str):
     left, right = st.columns(2)
     with left:
         st.markdown("#### Funded loans per day")
-        st.line_chart(date_ready(daily), x="block_date", y="loan_count")
+        time_series_chart(
+            daily.rename(columns={"loan_count": "Funded loans"}),
+            ["Funded loans"],
+            value_kind="count",
+            y_title="Loans",
+        )
     with right:
         st.markdown("#### Priced origination volume (USD)")
         temp = daily.rename(columns={"loan_count": "originated_loans"})
@@ -387,7 +634,12 @@ def render_lending(daily: pd.DataFrame, window: str):
         "unique_borrowers": "Borrowers",
         "unique_users": "Distinct wallets",
     })
-    st.line_chart(participants, x="block_date", y=["Lenders", "Borrowers", "Distinct wallets"])
+    time_series_chart(
+        participants,
+        ["Lenders", "Borrowers", "Distinct wallets"],
+        value_kind="count",
+        y_title="Wallets",
+    )
     st.caption("Each participation count is distinct within one date; lenders and borrowers may overlap.")
 
 
@@ -406,7 +658,14 @@ def render_lifecycle(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
             "Loan status": ["Active", "Repaid", "Defaulted"],
             "Loans": [s["active_loans"], s["repaid_loans"], s["defaulted_loans"]],
         })
-        st.bar_chart(breakdown, x="Loan status", y="Loans")
+        labeled_bar_chart(
+            breakdown,
+            "Loan status",
+            "Loans",
+            value_kind="count",
+            axis_title="Loans",
+            horizontal=False,
+        )
 
     st.subheader(f"Lifecycle events · {window}")
     if daily.empty:
@@ -424,7 +683,12 @@ def render_lifecycle(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
         "repaid_loans": "Repayments",
         "defaulted_loans": "Defaults",
     })
-    st.line_chart(activity, x="block_date", y=["Originations", "Repayments", "Defaults"])
+    time_series_chart(
+        activity,
+        ["Originations", "Repayments", "Defaults"],
+        value_kind="count",
+        y_title="Loans",
+    )
     st.caption("USD values for origination, repayment, and default may use prices from different event times; do not net them as a cash-flow measure.")
 
 
@@ -463,7 +727,13 @@ def render_markets(markets: pd.DataFrame, window: str):
     with left:
         st.markdown("#### Top markets by originated loans")
         top = markets.sort_values("originated_loans", ascending=False).head(10)
-        st.bar_chart(top, x="market_label", y="originated_loans")
+        labeled_bar_chart(
+            top,
+            "market_label",
+            "originated_loans",
+            value_kind="count",
+            axis_title="Loans",
+        )
     with right:
         st.markdown("#### Top markets by priced USD originations")
         priced_markets = markets[priced.gt(0)].dropna(subset=["origination_volume_usd"])
@@ -471,7 +741,13 @@ def render_markets(markets: pd.DataFrame, window: str):
         if top.empty:
             st.info("No historical USD prices are available for this period.")
         else:
-            st.bar_chart(top, x="market_label", y="origination_volume_usd")
+            labeled_bar_chart(
+                top,
+                "market_label",
+                "origination_volume_usd",
+                value_kind="usd",
+                axis_title="Priced origination USD",
+            )
 
     st.markdown("#### Market leaderboard")
     table = markets[[
@@ -488,7 +764,18 @@ def render_markets(markets: pd.DataFrame, window: str):
         "principal_asset_key": "Principal key",
         "collateral_asset_key": "Collateral key",
     })
-    st.dataframe(table, hide_index=True, use_container_width=True)
+    st.dataframe(
+        table,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Originations": st.column_config.NumberColumn(format="%d"),
+            "Repayments": st.column_config.NumberColumn(format="%d"),
+            "Defaults": st.column_config.NumberColumn(format="%d"),
+            "Priced origination USD": st.column_config.NumberColumn(format="$%.2f"),
+            "Priced originations (%)": st.column_config.NumberColumn(format="%.1f%%"),
+        },
+    )
     st.download_button(
         "Download market data (CSV)",
         data=markets.to_csv(index=False).encode("utf-8"),
@@ -567,14 +854,14 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
 
         a, b, c, d = st.columns(4)
         a.metric("Offers created", count_text(offers))
-        b.metric("Reached a fill", "N/A" if pd.isna(fill_rate) else f"{fill_rate:.1f}%")
-        c.metric("Fully fulfilled", "N/A" if pd.isna(full_fill_rate) else f"{full_fill_rate:.1f}%")
+        b.metric("Reached a fill", percent_text(fill_rate))
+        c.metric("Fully fulfilled", percent_text(full_fill_rate))
         d.metric("Avg time to first fill", elapsed_text(avg_fill_seconds))
 
         e, f, g = st.columns(3)
-        e.metric("Average offered APY", "N/A" if pd.isna(avg_apy_raw) else f"{avg_apy_raw / 100:.2f}%")
-        f.metric("Cancelled", "N/A" if pd.isna(cancel_rate) else f"{cancel_rate:.1f}%")
-        g.metric("Expired", "N/A" if pd.isna(expiry_rate) else f"{expiry_rate:.1f}%")
+        e.metric("Average offered APY", apy_text(avg_apy_raw))
+        f.metric("Cancelled", percent_text(cancel_rate))
+        g.metric("Expired", percent_text(expiry_rate))
 
         daily = (
             eff.groupby("block_date", as_index=False)[
@@ -599,15 +886,21 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
                 "cancelled_offers": "Cancelled",
                 "expired_offers": "Expired",
             })
-            st.line_chart(
+            time_series_chart(
                 chart,
-                x="block_date",
-                y=["Created", "Reached a fill", "Fulfilled", "Cancelled", "Expired"],
+                ["Created", "Reached a fill", "Fulfilled", "Cancelled", "Expired"],
+                value_kind="count",
+                y_title="Offers",
             )
 
         with right:
             st.markdown("#### Fill rate by creation date")
-            st.line_chart(date_ready(daily), x="block_date", y="fill_rate_pct")
+            time_series_chart(
+                daily.rename(columns={"fill_rate_pct": "Fill rate"}),
+                ["Fill rate"],
+                value_kind="percent",
+                y_title="Fill rate",
+            )
 
         market = (
             eff.groupby(
@@ -637,10 +930,37 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
         )
 
         st.markdown("#### Market fill performance")
+        market_table = market.sort_values("offers_created", ascending=False).rename(columns={
+            "market_name": "Market",
+            "offers_created": "Offers",
+            "offers_with_fill": "Reached fill",
+            "fulfilled_offers": "Fulfilled",
+            "cancelled_offers": "Cancelled",
+            "expired_offers": "Expired",
+            "loans_created": "Loans created",
+            "fill_rate_pct": "Fill rate (%)",
+            "cancel_rate_pct": "Cancel rate (%)",
+            "expiry_rate_pct": "Expiry rate (%)",
+        })
         st.dataframe(
-            market.sort_values("offers_created", ascending=False),
+            market_table[[
+                "Market", "Offers", "Reached fill", "Fulfilled", "Cancelled",
+                "Expired", "Loans created", "Fill rate (%)", "Cancel rate (%)",
+                "Expiry rate (%)",
+            ]],
             hide_index=True,
             use_container_width=True,
+            column_config={
+                "Offers": st.column_config.NumberColumn(format="%d"),
+                "Reached fill": st.column_config.NumberColumn(format="%d"),
+                "Fulfilled": st.column_config.NumberColumn(format="%d"),
+                "Cancelled": st.column_config.NumberColumn(format="%d"),
+                "Expired": st.column_config.NumberColumn(format="%d"),
+                "Loans created": st.column_config.NumberColumn(format="%d"),
+                "Fill rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                "Cancel rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                "Expiry rate (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            },
         )
 
     st.markdown("### Developer view")
@@ -671,8 +991,8 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
 
         a, b, c, d = st.columns(4)
         a.metric("Open offers", count_text(open_offers))
-        b.metric("Stale >7d", "N/A" if pd.isna(stale7_pct) else f"{stale7_pct:.1f}%")
-        c.metric("Stale >30d", "N/A" if pd.isna(stale30_pct) else f"{stale30_pct:.1f}%")
+        b.metric("Stale >7d", percent_text(stale7_pct))
+        c.metric("Stale >30d", percent_text(stale30_pct))
         d.metric("Typical open-offer age", elapsed_text(typical_age))
 
         market_liq = (
@@ -698,10 +1018,12 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
         left, right = st.columns(2)
         with left:
             st.markdown("#### Markets with the most open offers")
-            st.bar_chart(
+            labeled_bar_chart(
                 market_liq.sort_values("open_offers", ascending=False).head(12),
-                x="market_name",
-                y="open_offers",
+                "market_name",
+                "open_offers",
+                value_kind="count",
+                axis_title="Open offers",
             )
 
         with right:
@@ -713,14 +1035,42 @@ def render_offer_insights(efficiency: pd.DataFrame, liquidity: pd.DataFrame, win
             if attention.empty:
                 st.info("No markets with at least 3 open offers are available.")
             else:
-                st.bar_chart(attention, x="market_name", y="stale_7d_pct")
+                labeled_bar_chart(
+                    attention,
+                    "market_name",
+                    "stale_7d_pct",
+                    value_kind="percent",
+                    axis_title="Stale >7d",
+                )
 
         st.markdown("#### Markets that may need matching work")
         attention = market_liq[market_liq["open_offers"].ge(3)].sort_values(
             ["stale_7d_pct", "open_offers"],
             ascending=[False, False],
         )
-        st.dataframe(attention, hide_index=True, use_container_width=True)
+        attention_table = attention.rename(columns={
+            "market_name": "Market",
+            "open_offers": "Open offers",
+            "stale_7d_offers": "Stale >7d",
+            "stale_30d_offers": "Stale >30d",
+            "stale_7d_pct": "Stale >7d (%)",
+            "stale_30d_pct": "Stale >30d (%)",
+        })
+        st.dataframe(
+            attention_table[[
+                "Market", "Open offers", "Stale >7d", "Stale >30d",
+                "Stale >7d (%)", "Stale >30d (%)",
+            ]],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Open offers": st.column_config.NumberColumn(format="%d"),
+                "Stale >7d": st.column_config.NumberColumn(format="%d"),
+                "Stale >30d": st.column_config.NumberColumn(format="%d"),
+                "Stale >7d (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                "Stale >30d (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            },
+        )
 
     st.info(
         "Recent offer cohorts are right-censored: newer offers have had less time to fill, "
@@ -748,7 +1098,12 @@ def render_activity(activity: pd.DataFrame, window: str):
 
     daily = activity.groupby("block_date", as_index=False)["instruction_count"].sum()
     st.markdown("#### Instructions per day")
-    st.line_chart(date_ready(daily), x="block_date", y="instruction_count")
+    time_series_chart(
+        daily.rename(columns={"instruction_count": "Instructions"}),
+        ["Instructions"],
+        value_kind="count",
+        y_title="Instructions",
+    )
 
     rankings = (
         activity.groupby("instruction_name", as_index=False)["instruction_count"]
@@ -758,7 +1113,13 @@ def render_activity(activity: pd.DataFrame, window: str):
     left, right = st.columns(2)
     with left:
         st.markdown("#### Top instruction types")
-        st.bar_chart(rankings.head(12), x="instruction_name", y="instruction_count")
+        labeled_bar_chart(
+            rankings.head(12),
+            "instruction_name",
+            "instruction_count",
+            value_kind="count",
+            axis_title="Instructions",
+        )
     with right:
         st.markdown("#### Full instruction breakdown")
         st.dataframe(rankings, hide_index=True, use_container_width=True)
