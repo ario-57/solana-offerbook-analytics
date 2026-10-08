@@ -598,15 +598,37 @@ def time_series_chart(
         color=color_encoding,
     )
 
-    tooltip = [
+    shared_tooltip = [
         alt.Tooltip("block_date:T", title="Date", format="%b %d, %Y"),
-        alt.Tooltip("Series:N", title="Metric"),
-        alt.Tooltip(
-            "Value:Q",
-            title=y_title or "Value",
-            format=_tooltip_format(value_kind),
-        ),
     ]
+    for column in y_columns:
+        shared_tooltip.append(
+            alt.Tooltip(
+                f"{column}:Q",
+                title=column,
+                format=_tooltip_format(value_kind),
+            )
+        )
+
+    selector = (
+        alt.Chart(data)
+        .mark_point(opacity=0, size=1000)
+        .encode(
+            x=x_encoding,
+            tooltip=shared_tooltip,
+        )
+        .add_params(nearest)
+    )
+
+    rule = (
+        alt.Chart(data)
+        .mark_rule(strokeWidth=1)
+        .encode(
+            x=x_encoding,
+            opacity=alt.condition(nearest, alt.value(0.5), alt.value(0)),
+        )
+        .transform_filter(nearest)
+    )
 
     if mark == "bar":
         bars = base.mark_bar(
@@ -614,39 +636,12 @@ def time_series_chart(
             cornerRadiusTopRight=3,
         ).encode(
             opacity=alt.condition(nearest, alt.value(1), alt.value(0.78)),
-            tooltip=tooltip,
         )
-
-        selectors = (
-            alt.Chart(long)
-            .mark_point(opacity=0)
-            .encode(x=x_encoding)
-            .add_params(nearest)
-        )
-
-        rule = (
-            alt.Chart(long)
-            .mark_rule(strokeWidth=1)
-            .encode(
-                x=x_encoding,
-                opacity=alt.condition(nearest, alt.value(0.45), alt.value(0)),
-            )
-            .transform_filter(nearest)
-        )
-
-        chart = bars + selectors + rule
-
+        chart = bars + selector + rule
     else:
         lines = base.mark_line(
             strokeWidth=2.4,
             interpolate="monotone",
-        )
-
-        selectors = (
-            alt.Chart(long)
-            .mark_point(opacity=0)
-            .encode(x=x_encoding)
-            .add_params(nearest)
         )
 
         points = base.mark_point(
@@ -655,20 +650,9 @@ def time_series_chart(
             strokeWidth=1.5,
         ).encode(
             opacity=alt.condition(nearest, alt.value(1), alt.value(0)),
-            tooltip=tooltip,
         ).transform_filter(nearest)
 
-        rule = (
-            alt.Chart(long)
-            .mark_rule(strokeWidth=1)
-            .encode(
-                x=x_encoding,
-                opacity=alt.condition(nearest, alt.value(0.5), alt.value(0)),
-            )
-            .transform_filter(nearest)
-        )
-
-        chart = lines + selectors + points + rule
+        chart = lines + selector + points + rule
 
     st.altair_chart(
         chart.properties(height=300).configure_view(stroke=None),
