@@ -627,3 +627,29 @@ models:
         data_tests:
           - not_null
 
+  - name: int_offerbook_wallet_activity
+    description: >
+      One row per UTC date, wallet and Offerbook role for meaningful loan
+      lifecycle activity. Activity includes originations, repayments and
+      defaults and records each wallet's first activity date for that role.
+    columns:
+      - name: block_date
+        data_tests:
+          - not_null
+
+      - name: wallet_address
+        data_tests:
+          - not_null
+
+      - name: wallet_role
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - lender
+                  - borrower
+
+      - name: first_role_activity_date
+        data_tests:
+          - not_null
