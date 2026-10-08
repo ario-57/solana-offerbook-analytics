@@ -144,6 +144,12 @@ select
     sum(compute_units_consumed)
         as total_compute_units,
 
+    sum(
+        case when is_success
+            then compute_units_consumed
+        end
+    ) as successful_compute_units,
+
     avg(compute_units_consumed)
         as avg_compute_units,
 
