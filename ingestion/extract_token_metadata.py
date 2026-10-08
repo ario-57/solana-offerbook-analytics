@@ -114,7 +114,29 @@ def get_missing_metadata_mints(con):
                 )
           )
 
-        order by m.mint_address
+        order by
+            case
+                when exists (
+                    select 1
+                    from main.int_offerbook_offer_lifecycle o
+                    where o.lifecycle_status in ('Active', 'PartiallyFilled')
+                      and (
+                          (
+                              o.principal_asset_type = 'Token'
+                              and split_part(o.principal_asset_key, ':', 2)
+                                  = m.mint_address
+                          )
+                          or (
+                              o.collateral_asset_type = 'Token'
+                              and split_part(o.collateral_asset_key, ':', 2)
+                                  = m.mint_address
+                          )
+                      )
+                )
+                then 0
+                else 1
+            end,
+            m.mint_address
     """).fetchall()
 
 

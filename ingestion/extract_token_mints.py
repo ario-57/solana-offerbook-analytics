@@ -74,6 +74,14 @@ def rpc_request(method, params):
 
 
 def get_offerbook_mints(con):
+    """
+    Return every fungible-token mint observed by Offerbook that still needs
+    mint-account metadata.
+
+    Instruction accounts cover token/token offer instructions. Offer events
+    additionally cover mixed asset offers such as Token/CoreNFT, so include
+    Token-prefixed event asset keys as well.
+    """
 
     rows = con.execute("""
         with offerbook_mints as (
@@ -86,6 +94,22 @@ def get_offerbook_mints(con):
             select collateral_mint as mint_address
             from main.int_offerbook_offer_accounts
 
+            union
+
+            select
+                split_part(principal_asset_key, ':', 2)
+                    as mint_address
+            from main.int_offerbook_offer_events
+            where principal_asset_type = 'Token'
+
+            union
+
+            select
+                split_part(collateral_asset_key, ':', 2)
+                    as mint_address
+            from main.int_offerbook_offer_events
+            where collateral_asset_type = 'Token'
+
         )
 
         select
@@ -97,6 +121,7 @@ def get_offerbook_mints(con):
             on o.mint_address = m.mint_address
 
         where o.mint_address is not null
+          and o.mint_address != ''
 
           and (
               m.mint_address is null
