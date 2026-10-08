@@ -1034,6 +1034,12 @@ def render_overview(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
 
     s = snapshot.iloc[0]
     st.subheader("Lifetime protocol snapshot")
+    if pd.notna(s.get("snapshot_at")):
+        st.caption(
+            "Snapshot computed at "
+            f"{pd.to_datetime(s['snapshot_at'], utc=True).strftime('%Y-%m-%d %H:%M UTC')} "
+            "(last dbt refresh; not live on-chain state)."
+        )
     render_kpi_grid([
         ("Originated loans", count_text(s["total_loans"])),
         ("Active loans", count_text(s["active_loans"])),
@@ -1601,6 +1607,12 @@ def render_lifecycle(snapshot: pd.DataFrame, daily: pd.DataFrame, window: str):
     st.subheader("Current lifecycle state · lifetime snapshot")
     if not snapshot.empty:
         s = snapshot.iloc[0]
+        if pd.notna(s.get("snapshot_at")):
+            st.caption(
+                "Snapshot computed at "
+                f"{pd.to_datetime(s['snapshot_at'], utc=True).strftime('%Y-%m-%d %H:%M UTC')} "
+                "(last dbt refresh)."
+            )
         render_kpi_grid([
             ("Active", count_text(s["active_loans"])),
             ("Repaid", count_text(s["repaid_loans"])),
