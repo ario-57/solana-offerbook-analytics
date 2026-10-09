@@ -1,15 +1,9 @@
-Welcome to your new dbt project!
+# Jupiter Offerbook Analytics
 
-### Using the starter project
+An end-to-end data engineering and analytics pipeline for **Jupiter Offerbook**, a lending protocol on Solana.
 
-Try running the following commands:
-- dbt run
-- dbt test
+The project ingests raw transactions from Solana RPC, decodes Anchor instructions and events using the protocol's IDL, and transforms the data into analytics-ready models with **dbt and DuckDB/MotherDuck**.
 
+It includes a Streamlit dashboard for exploring lending activity, loan lifecycles, market liquidity, lender and borrower performance, wallet retention, and protocol execution metrics such as compute-unit consumption and transaction fees.
 
-### Resources:
-- Learn more about dbt [in the docs](https://docs.getdbt.com/docs/introduction)
-- Check out [Discourse](https://discourse.getdbt.com/) for commonly asked questions and answers
-- Join the [chat](https://community.getdbt.com/) on Slack for live discussions and support
-- Find [dbt events](https://events.getdbt.com) near you
-- Check out [the blog](https://blog.getdbt.com/) for the latest news on dbt's development and best practices
+**Tech stack:** Python, SQL, dbt, DuckDB, MotherDuck, Solana RPC, GitHub Actions, Streamlit.
