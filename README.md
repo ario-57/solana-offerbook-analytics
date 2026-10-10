@@ -8,6 +8,8 @@ It includes a Streamlit dashboard for exploring lending activity, loan lifecycle
 
 **Tech stack:** Python, SQL, dbt, DuckDB, MotherDuck, Solana RPC, GitHub Actions, Streamlit.
 
+**Dashboard:** https://jupiter-offerbook.streamlit.app/
+
 ## Architecture
 
 The pipeline follows an ELT approach, combining Python-based ingestion and decoding with SQL transformations managed by dbt.
