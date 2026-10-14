@@ -33,6 +33,7 @@ jobs:
 
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+      SOLANA_ARCHIVE_RPC_URL: ${{ secrets.SOLANA_ARCHIVE_RPC_URL }}
       BIRDEYE_API_KEY: ${{ secrets.BIRDEYE_API_KEY }}
 
       DBT_PROFILES_DIR: .github/dbt
@@ -71,6 +72,10 @@ jobs:
           python -m pip install -r requirements.txt
 
           python -c "import duckdb; print('DuckDB version:', duckdb.__version__); assert duckdb.__version__ == '1.5.5'"
+
+      - name: Test ingestion recovery logic
+        run: |
+          python -m unittest discover -s tests -p 'test_*.py'
 
       # ==============================================
       # Verify production connection
