@@ -69,7 +69,7 @@ session = requests.Session()
 # RPC helper
 # ============================================================
 
-def rpc_call(method, params):
+def rpc_call(method, params, rpc_url=None):
 
     payload = {
         "jsonrpc": "2.0",
@@ -83,7 +83,7 @@ def rpc_call(method, params):
         try:
 
             response = session.post(
-                RPC_URL,
+                rpc_url or RPC_URL,
                 json=payload,
                 timeout=60,
             )
@@ -377,29 +377,67 @@ def discover_missing_signatures(
 # ============================================================
 
 def get_transaction(signature):
+    """Retrieve a finalized transaction without advancing past missing data.
 
-    result = rpc_call(
-        "getTransaction",
-        [
-            signature,
-            {
-                "encoding": "json",
-                "commitment": "finalized",
-                "maxSupportedTransactionVersion": 1,
-            },
-        ],
+    An HTTP 200 JSON-RPC response can still contain a null result.
+    Retry those responses separately from transport-level failures, and
+    optionally try an archival RPC endpoint before failing safely.
+    """
+    params = [
+        signature,
+        {
+            "encoding": "json",
+            "commitment": "finalized",
+            "maxSupportedTransactionVersion": 1,
+        },
+    ]
+
+    # A distinct, full-history RPC can help when the primary provider
+    # returns null for a finalized transaction.
+    archive_url = os.getenv("SOLANA_ARCHIVE_RPC_URL", "").strip()
+    endpoints = [("primary", RPC_URL)]
+    if archive_url and archive_url != RPC_URL:
+        endpoints.append(("archive", archive_url))
+
+    null_retries = max(
+        1, int(os.getenv("SOLANA_NULL_TX_RETRIES", "5"))
     )
 
+    for provider_name, rpc_url in endpoints:
+        for attempt in range(null_retries):
+            result = rpc_call(
+                "getTransaction", params, rpc_url=rpc_url
+            )
+            if result is not None:
+                if not isinstance(result, dict):
+                    raise RuntimeError(
+                        f"Unexpected getTransaction result "
+                        f"for {signature}: {type(result).__name__}"
+                    )
+                return result
 
-    if result is None:
+            if attempt + 1 < null_retries:
+                delay = min(2 ** attempt, 20)
+                print(
+                    f"getTransaction returned null for {signature} "
+                    f"on {provider_name} RPC "
+                    f"(attempt {attempt + 1}/{null_retries}); "
+                    f"retrying in {delay}s..."
+                )
+                time.sleep(delay)
 
-        raise RuntimeError(
-            f"getTransaction returned "
-            f"null for {signature}"
+        print(
+            f"getTransaction remained null for {signature} "
+            f"on {provider_name} RPC after {null_retries} attempts."
         )
 
-
-    return result
+    raise RuntimeError(
+        f"getTransaction returned null for {signature} "
+        f"after retries on all configured RPC endpoints. "
+        f"Ingestion stopped to preserve the forward boundary. "
+        f"If this persists, configure SOLANA_ARCHIVE_RPC_URL "
+        f"with a provider that retains historical transactions."
+    )
 
 
 # ============================================================
