@@ -47,3 +47,15 @@ Streamlit Dashboard
 - **Storage:** DuckDB for local development and MotherDuck for production datasets.
 - **Visualization:** Streamlit reads the prepared analytics marts.
 - **Orchestration:** GitHub Actions runs the ingestion, decoding, transformation, and data-quality workflows.
+
+## Event data quality
+
+The event decoder retains Anchor CPI events with an unfamiliar discriminator as
+`unknown_event`. These records have a null `event_name` and `decoded_event`; the
+discriminator and raw payload remain available for investigation and decoding
+with a future IDL. They are included in the workflow's decoding quality report.
+
+The source and staging dbt checks require event names for every other decode
+status, and decoded payloads for `ok` and `ok_with_remaining_bytes`. Null or
+unrecognized statuses still fail validation. Unknown events do not contribute to
+the downstream event analytics until they can be decoded.

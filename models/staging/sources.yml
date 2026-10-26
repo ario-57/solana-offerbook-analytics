@@ -121,8 +121,13 @@ sources:
               - not_null
 
           - name: event_name
+            description: >
+              IDL event name. Null only for unknown_event records, whose
+              discriminator and payload are retained for investigation.
             data_tests:
-              - not_null
+              - not_null:
+                  config:
+                    where: "decode_status != 'unknown_event'"
 
           - name: decoded_event
             data_tests:
@@ -133,6 +138,14 @@ sources:
           - name: decode_status
             data_tests:
               - not_null
+              - accepted_values:
+                  arguments:
+                    values:
+                      - ok
+                      - ok_with_remaining_bytes
+                      - unknown_event
+                      - missing_event_type
+                      - decode_error
 
           - name: idl_sha256
             data_tests:
